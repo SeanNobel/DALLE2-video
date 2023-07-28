@@ -6,12 +6,12 @@ setup(
     name="dalle2-video",
     packages=find_packages(exclude=[]),
     include_package_data=True,
-    #   entry_points={
-    #     'console_scripts': [
-    #       'dalle2_pytorch = dalle2_pytorch.cli:main',
-    #       'dream = dalle2_pytorch.cli:dream'
-    #     ],
-    #   },
+    entry_points={
+        "console_scripts": [
+            "dalle2_video = dalle2_video.cli:main",
+            # 'dream = dalle2_pytorch.cli:dream'
+        ],
+    },
     version="0.0.0",
     # license="MIT",
     description="Video generation based from CLIP embeddings.",
