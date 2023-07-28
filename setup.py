@@ -12,7 +12,7 @@ setup(
             # 'dream = dalle2_pytorch.cli:dream'
         ],
     },
-    version="0.0.0",
+    version="0.0.1",
     # license="MIT",
     description="Video generation based from CLIP embeddings.",
     author="Sensho Nobe",
