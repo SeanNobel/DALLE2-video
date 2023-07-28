@@ -987,7 +987,7 @@ class VideoDecoder(nn.Module):
             one_unet_learned_var,
             lowres_noise_cond,
         ) in enumerate(zip(unets, vaes, learned_variance, use_noise_for_lowres_cond)):
-            assert isinstance(one_unet, Unet)
+            assert isinstance(one_unet, UnetTemporalConv)
             assert isinstance(one_vae, (VQGanVAE, NullVQGanVAE))
 
             is_first = ind == 0

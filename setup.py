@@ -12,7 +12,7 @@ setup(
     #         "dream = DALLE2_video.cli:dream",
     #     ],
     # },
-    version="0.0.1",
+    version="0.0.0",
     # license="MIT",
     description="Video generation based from CLIP embeddings.",
     author="Sensho Nobe",
