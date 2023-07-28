@@ -325,13 +325,13 @@ class VideoDecoderTrainer(nn.Module):
         *args,
         unet_number=None,
         max_batch_size=None,
-        return_lowres_cond_image=False,
+        return_lowres_cond_video=False,
         **kwargs,
     ):
         unet_number = self.validate_and_return_unet_number(unet_number)
 
         total_loss = 0.0
-        cond_images = []
+        cond_videos = []
         for chunk_size_frac, (chunked_args, chunked_kwargs) in split_args_and_kwargs(
             *args, split_size=max_batch_size, **kwargs
         ):
@@ -339,25 +339,27 @@ class VideoDecoderTrainer(nn.Module):
                 loss_obj = self.decoder(
                     *chunked_args,
                     unet_number=unet_number,
-                    return_lowres_cond_image=return_lowres_cond_image,
+                    return_lowres_cond_video=return_lowres_cond_video,
                     **chunked_kwargs,
                 )
                 # loss_obj may be a tuple with loss and cond_image
-                if return_lowres_cond_image:
-                    loss, cond_image = loss_obj
+                if return_lowres_cond_video:
+                    loss, cond_video = loss_obj
                 else:
                     loss = loss_obj
-                    cond_image = None
+                    cond_video = None
+
                 loss = loss * chunk_size_frac
-                if cond_image is not None:
-                    cond_images.append(cond_image)
+
+                if cond_video is not None:
+                    cond_videos.append(cond_video)
 
             total_loss += loss.item()
 
             if self.training:
                 self.accelerator.backward(loss)
 
-        if return_lowres_cond_image:
-            return total_loss, torch.stack(cond_images)
+        if return_lowres_cond_video:
+            return total_loss, torch.stack(cond_videos)
         else:
             return total_loss

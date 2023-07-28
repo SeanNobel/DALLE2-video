@@ -953,19 +953,10 @@ class VideoDecoder(nn.Module):
         if len(use_blur_for_lowres_cond) < num_unets:
             use_blur_for_lowres_cond = (False, *use_blur_for_lowres_cond)
 
-        assert not use_noise_for_lowres_cond[
-            0
-        ], "first unet will never need low res noise conditioning"
-        assert not use_blur_for_lowres_cond[
-            0
-        ], "first unet will never need low res blur conditioning"
+        assert not use_noise_for_lowres_cond[0], "first unet will never need low res noise conditioning"  # fmt: skip
+        assert not use_blur_for_lowres_cond[0], "first unet will never need low res blur conditioning"  # fmt: skip
 
-        assert num_unets == 1 or all(
-            (use_noise or use_blur)
-            for use_noise, use_blur in zip(
-                use_noise_for_lowres_cond[1:], use_blur_for_lowres_cond[1:]
-            )
-        )
+        assert num_unets == 1 or all((use_noise or use_blur) for use_noise, use_blur in zip(use_noise_for_lowres_cond[1:], use_blur_for_lowres_cond[1:]))  # fmt: skip
 
         # construct unets and vaes
 
