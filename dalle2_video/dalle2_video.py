@@ -800,24 +800,15 @@ class Unet3D(nn.Module):
         return self.to_out(x)
 
 
-class UnetTemporalConv(nn.Module):
-    """NOTE: This is very preliminary implementation before implementing Unet3D
-    Args:
-        nn (_type_): _description_
-    Raises:
-        Error: _description_
-    Returns:
-        _type_: _description_
-    """
+class UnetTemporalConv(Unet):
+    """NOTE: This is very preliminary implementation before implementing Unet3D."""
 
     def __init__(self, *args, **kwargs):
-        super().__init__()
+        super().__init__(*args, **kwargs)
 
-        self.unet = Unet(*args, **kwargs)
-
-        self.conv = nn.Conv3d(
-            in_channels=self.unet.channels_out,
-            out_channels=self.unet.channels_out,
+        self.temporal_conv = nn.Conv3d(
+            in_channels=self.channels_out,
+            out_channels=self.channels_out,
             kernel_size=(3, 1, 1),
             stride=1,
             padding="same",
@@ -827,11 +818,11 @@ class UnetTemporalConv(nn.Module):
         b, t, c, h, w = x.shape
 
         x = x.view(b * t, c, h, w)
-        x = self.unet(x, *args, **kwargs)
+        x = super().forward(x, *args, **kwargs)
 
         x = x.view(b, t, c, h, w).permute(0, 2, 1, 3, 4)
 
-        x = self.conv(x)
+        x = self.temporal_conv(x)
 
         return x.permute(0, 2, 1, 3, 4)
 
