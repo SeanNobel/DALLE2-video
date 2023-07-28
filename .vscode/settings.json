@@ -1,0 +1,28 @@
+{
+    // linter
+    "python.linting.enabled": false,
+    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": false,
+    "python.linting.lintOnSave": false,
+    // formatter
+    "python.formatting.provider": "black",
+    "python.formatting.blackArgs": [
+        "--line-length=90",
+    ],
+    "[python]": {
+        "editor.formatOnSave": true,
+        "editor.formatOnPaste": false,
+        "editor.defaultFormatter": "ms-python.black-formatter",
+    },
+    "black-formatter.args": [
+        "--line-length=90",
+    ],
+    // test
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "black-formatter.importStrategy": "useBundled",
+}
