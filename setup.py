@@ -4,20 +4,20 @@ from setuptools import setup, find_packages
 
 setup(
     name="dalle2-video",
-    packages=find_packages(exclude=[]),
-    include_package_data=True,
-    entry_points={
-        "console_scripts": [
-            "dalle2_video = dalle2_video.cli:main",
-            # 'dream = dalle2_pytorch.cli:dream'
-        ],
-    },
+    # packages=find_packages(exclude=[]),
+    # include_package_data=True,
+    # entry_points={
+    #     "console_scripts": [
+    #         "dalle2_video = DALLE2_video.cli:main",
+    #         "dream = DALLE2_video.cli:dream",
+    #     ],
+    # },
     version="0.0.1",
     # license="MIT",
     description="Video generation based from CLIP embeddings.",
     author="Sensho Nobe",
     author_email="sean.y.nobel@gmail.com",
-    long_description_content_type="text/markdown",
+    # long_description_content_type="text/markdown",
     url="https://github.com/SeanNobel/DALLE2-video",
     keywords=["artificial intelligence", "deep learning", "text to image"],
     install_requires=[
