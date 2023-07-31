@@ -824,9 +824,26 @@ class UnetTemporalConv(Unet):
         video_cond_drop_prob: float,
         **kwargs,
     ):
+        """_summary_
+        Args:
+            x (torch.Tensor): _description_
+            video_embed:  ( b, d )
+            lowres_cond_video (torch.Tensor): _description_
+            video_cond_drop_prob (float): _description_
+        Returns:
+            _type_: _description_
+        """
         b, t, c, h, w = x.shape
 
         x = x.view(b * t, c, h, w)
+
+        cprint(video_embed.shape, "yellow")
+
+        # FIXME
+        video_embed = video_embed.repeat(t)
+
+        cprint(video_embed.shape, "yellow")
+
         x = super().forward(
             x,
             *args,
@@ -1646,6 +1663,8 @@ class VideoDecoder(nn.Module):
                 self_cond = self_cond.detach()
 
         # forward to get model prediction
+
+        cprint(x_noisy.shape)
 
         unet_output = unet(
             x_noisy,
