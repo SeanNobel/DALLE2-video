@@ -1904,6 +1904,9 @@ class VideoDecoder(nn.Module):
         learned_variance = self.learned_variance[unet_index]
         b, t, c, h, w, device = *video.shape, video.device
 
+        cprint(video.shape, "yellow")
+        cprint(self.channels, "yellow")
+
         assert video.shape[2] == self.channels
         assert h >= target_frame_size and w >= target_frame_size
 

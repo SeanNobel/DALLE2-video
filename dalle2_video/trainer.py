@@ -335,7 +335,6 @@ class VideoDecoderTrainer(nn.Module):
         for chunk_size_frac, (chunked_args, chunked_kwargs) in split_args_and_kwargs(
             *args, split_size=max_batch_size, **kwargs
         ):
-            print(chunked_args)
             with self.accelerator.autocast():
                 loss_obj = self.decoder(
                     *chunked_args,
