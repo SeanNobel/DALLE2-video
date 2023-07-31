@@ -1124,7 +1124,7 @@ class VideoDecoder(nn.Module):
 
         # classifier free guidance
 
-        self.image_cond_drop_prob = video_cond_drop_prob
+        self.video_cond_drop_prob = video_cond_drop_prob
         self.text_cond_drop_prob = text_cond_drop_prob
         self.can_classifier_guidance = (
             video_cond_drop_prob > 0.0 or text_cond_drop_prob > 0.0
