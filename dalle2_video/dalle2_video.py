@@ -1,3 +1,4 @@
+from typing import Any, Callable, Optional, Union, Tuple, List, Dict
 import torch
 import torch.nn as nn
 
@@ -833,19 +834,24 @@ class VideoDecoder(nn.Module):
         unet,
         *,
         clip=None,
-        image_size=None,
+        frame_size=None,
         channels=3,
         vae=tuple(),
         timesteps=1000,
         sample_timesteps=None,
-        image_cond_drop_prob=0.1,
+        video_cond_drop_prob=0.1,
         text_cond_drop_prob=0.5,
         loss_type="l2",
         beta_schedule=None,
         predict_x_start=False,
         predict_v=False,
         predict_x_start_for_latent_diffusion=False,
-        image_sizes=None,  # for cascading ddpm, image size at each stage
+        frame_sizes: Optional[
+            Tuple[int]
+        ] = None,  # for cascading ddpm, frame size at each stage
+        frame_numbers: Optional[
+            Tuple[int]
+        ] = None,  # for cascading temporal super-resolution
         random_crop_sizes=None,  # whether to random crop the image at that stage in the cascade (super resoluting convolutions at the end may be able to generalize on smaller crops)
         use_noise_for_lowres_cond=False,  # whether to use Imagen-like noising for low resolution conditioning
         use_blur_for_lowres_cond=True,  # whether to use the blur conditioning used in the original cascading ddpm paper, as well as DALL-E2
@@ -874,12 +880,8 @@ class VideoDecoder(nn.Module):
 
         self.clip = None
         if exists(clip):
-            assert (
-                not unconditional
-            ), "clip must not be given if doing unconditional image training"
-            assert (
-                channels == clip.image_channels
-            ), f"channels of image ({channels}) should be equal to the channels that CLIP accepts ({clip.image_channels})"
+            assert not unconditional, "clip must not be given if doing unconditional image training"  # fmt: skip
+            assert channels == clip.image_channels, f"channels of image ({channels}) should be equal to the channels that CLIP accepts ({clip.image_channels})"  # fmt: skip
 
             if isinstance(clip, CLIP):
                 clip = XClipAdapter(clip, **clip_adapter_overrides)
@@ -894,16 +896,14 @@ class VideoDecoder(nn.Module):
         # determine image size, with image_size and image_sizes taking precedence
 
         if exists(image_size) or exists(image_sizes):
-            assert exists(image_size) ^ exists(
-                image_sizes
-            ), "only one of image_size or image_sizes must be given"
+            assert exists(image_size) ^ exists(image_sizes), "only one of image_size or image_sizes must be given"  # fmt: skip
             image_size = default(image_size, lambda: image_sizes[-1])
+
         elif exists(clip):
             image_size = clip.image_size
+
         else:
-            raise Error(
-                "either image_size, image_sizes, or clip must be given to decoder"
-            )
+            raise Exception("either image_size, image_sizes, or clip must be given to decoder")  # fmt: skip
 
         # channels
 
@@ -923,7 +923,7 @@ class VideoDecoder(nn.Module):
         self.unconditional = unconditional
 
         # automatically take care of ensuring that first unet is unconditional
-        # while the rest of the unets are conditioned on the low resolution image produced by previous unet
+        # while the rest of the unets are conditioned on the low resolution shorter video produced by previous unet
 
         vaes = pad_tuple_to_length(
             cast_tuple(vae), len(unets), fillvalue=NullVQGanVAE(channels=self.channels)
@@ -1029,23 +1029,24 @@ class VideoDecoder(nn.Module):
 
             self.noise_schedulers.append(noise_scheduler)
 
-        # unet image sizes
+        # unet frame sizes
 
-        image_sizes = default(image_sizes, (image_size,))
-        image_sizes = tuple(sorted(set(image_sizes)))
+        # NOTE: Currently only supporting square videos
+        frame_sizes = default(frame_sizes, (frame_size,))
+        frame_sizes = tuple(sorted(set(frame_sizes)))
 
-        assert self.num_unets == len(
-            image_sizes
-        ), f"you did not supply the correct number of u-nets ({self.num_unets}) for resolutions {image_sizes}"
-        self.image_sizes = image_sizes
-        self.sample_channels = cast_tuple(self.channels, len(image_sizes))
+        assert self.num_unets == len(frame_sizes), f"you did not supply the correct number of u-nets ({self.num_unets}) for resolutions {frame_sizes}"  # fmt: skip
+        self.frame_sizes = frame_sizes
+        self.sample_channels = cast_tuple(self.channels, len(frame_sizes))
+
+        # unet frame numbers
+
+        self.frame_numbers = frame_numbers
 
         # random crop sizes (for super-resoluting unets at the end of cascade?)
 
-        self.random_crop_sizes = cast_tuple(random_crop_sizes, len(image_sizes))
-        assert not exists(
-            self.random_crop_sizes[0]
-        ), "you would not need to randomly crop the image for the base unet"
+        self.random_crop_sizes = cast_tuple(random_crop_sizes, len(frame_sizes))
+        assert not exists(self.random_crop_sizes[0]), "you would not need to randomly crop the image for the base unet"  # fmt: skip
 
         # predict x0 config
 
@@ -1066,10 +1067,7 @@ class VideoDecoder(nn.Module):
         # cascading ddpm related stuff
 
         lowres_conditions = tuple(map(lambda t: t.lowres_cond, self.unets))
-        assert lowres_conditions == (
-            False,
-            *((True,) * (num_unets - 1)),
-        ), "the first unet must be unconditioned (by low resolution image), and the rest of the unets must have `lowres_cond` set to True"
+        assert lowres_conditions == (False, *((True,) * (num_unets - 1)),), "the first unet must be unconditioned (by low resolution image), and the rest of the unets must have `lowres_cond` set to True"  # fmt: skip
 
         self.lowres_conds = nn.ModuleList([])
 
@@ -1098,10 +1096,10 @@ class VideoDecoder(nn.Module):
 
         # classifier free guidance
 
-        self.image_cond_drop_prob = image_cond_drop_prob
+        self.image_cond_drop_prob = video_cond_drop_prob
         self.text_cond_drop_prob = text_cond_drop_prob
         self.can_classifier_guidance = (
-            image_cond_drop_prob > 0.0 or text_cond_drop_prob > 0.0
+            video_cond_drop_prob > 0.0 or text_cond_drop_prob > 0.0
         )
 
         # whether to clip when sampling
@@ -1864,6 +1862,7 @@ class VideoDecoder(nn.Module):
         assert video.shape[2] == self.channels
         assert h >= target_frame_size and w >= target_frame_size
 
+        # Random timesteps to sample from.
         times = torch.randint(
             0, noise_scheduler.num_timesteps, (b,), device=device, dtype=torch.long
         )
@@ -1874,17 +1873,11 @@ class VideoDecoder(nn.Module):
         #     image_embed, _ = self.clip.embed_image(image)
 
         if exists(text) and not exists(text_encodings) and not self.unconditional:
-            assert exists(
-                self.clip
-            ), "if you are passing in raw text, you need to supply `clip` to the decoder"
+            assert exists(self.clip), "if you are passing in raw text, you need to supply `clip` to the decoder"  # fmt: skip
             _, text_encodings = self.clip.embed_text(text)
 
-        assert not (
-            self.condition_on_text_encodings and not exists(text_encodings)
-        ), "text or text encodings must be passed into decoder if specified"
-        assert not (
-            not self.condition_on_text_encodings and exists(text_encodings)
-        ), "decoder specified not to be conditioned on text, yet it is presented"
+        assert not self.condition_on_text_encodings and not exists(text_encodings), "text or text encodings must be passed into decoder if specified"  # fmt: skip
+        assert not (not self.condition_on_text_encodings and exists(text_encodings)), "decoder specified not to be conditioned on text, yet it is presented"  # fmt: skip
 
         lowres_cond_video, lowres_noise_level = (
             lowres_conditioner(
