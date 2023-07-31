@@ -555,7 +555,7 @@ class Unet3D(nn.Module):
             return logits
 
         null_logits = self.forward(
-            *args, text_cond_drop_prob=1.0, image_cond_drop_prob=1.0, **kwargs
+            *args, text_cond_drop_prob=1.0, video_cond_drop_prob=1.0, **kwargs
         )
         return null_logits + (logits - null_logits) * cond_scale
 
@@ -831,7 +831,7 @@ class UnetTemporalConv(Unet):
 class VideoDecoder(nn.Module):
     def __init__(
         self,
-        unet,
+        unet: Union[Unet3D, UnetTemporalConv],
         *,
         clip=None,
         frame_size=None,
@@ -846,12 +846,8 @@ class VideoDecoder(nn.Module):
         predict_x_start=False,
         predict_v=False,
         predict_x_start_for_latent_diffusion=False,
-        frame_sizes: Optional[
-            Tuple[int]
-        ] = None,  # for cascading ddpm, frame size at each stage
-        frame_numbers: Optional[
-            Tuple[int]
-        ] = None,  # for cascading temporal super-resolution
+        frame_sizes: Optional[Tuple[int]] = None,
+        frame_numbers: Optional[Tuple[int]] = None,
         random_crop_sizes=None,  # whether to random crop the image at that stage in the cascade (super resoluting convolutions at the end may be able to generalize on smaller crops)
         use_noise_for_lowres_cond=False,  # whether to use Imagen-like noising for low resolution conditioning
         use_blur_for_lowres_cond=True,  # whether to use the blur conditioning used in the original cascading ddpm paper, as well as DALL-E2
@@ -867,13 +863,41 @@ class VideoDecoder(nn.Module):
         learned_variance_constrain_frac=False,
         vb_loss_weight=0.001,
         unconditional=False,  # set to True for generating images without conditioning
-        auto_normalize_img=True,  # whether to take care of normalizing the image from [0, 1] to [-1, 1] and back automatically - you can turn this off if you want to pass in the [-1, 1] ranged image yourself from the dataloader
+        auto_normalize_video: bool = True,  # whether to take care of normalizing the image from [0, 1] to [-1, 1] and back automatically - you can turn this off if you want to pass in the [-1, 1] ranged image yourself from the dataloader
         use_dynamic_thres=False,  # from the Imagen paper
         dynamic_thres_percentile=0.95,
         p2_loss_weight_gamma=0.0,  # p2 loss weight, from https://arxiv.org/abs/2204.00227 - 0 is equivalent to weight of 1 across time - 1. is recommended
         p2_loss_weight_k=1,
         ddim_sampling_eta=0.0,  # can be set to 0. for deterministic sampling afaict
     ):
+        """_summary_
+        Args:
+            unet (_type_): _description_
+            clip (_type_, optional): _description_. Defaults to None.
+            frame_size (_type_, optional): _description_. Defaults to None.
+            channels (int, optional): _description_. Defaults to 3.
+            vae (_type_, optional): _description_. Defaults to tuple().
+            timesteps (int, optional): _description_. Defaults to 1000.
+            sample_timesteps (_type_, optional): _description_. Defaults to None.
+            video_cond_drop_prob (float, optional): _description_. Defaults to 0.1.
+            text_cond_drop_prob (float, optional): _description_. Defaults to 0.5.
+            loss_type (str, optional): _description_. Defaults to "l2".
+            beta_schedule (_type_, optional): _description_. Defaults to None.
+            predict_x_start (bool, optional): _description_. Defaults to False.
+            predict_v (bool, optional): _description_. Defaults to False.
+            predict_x_start_for_latent_diffusion (bool, optional): _description_. Defaults to False.
+            frame_sizes: For cascading ddpm, frame size at each stage.
+            frame_numbers: For cascading temporal super-resolution.
+            clip_x_start (bool, optional): _description_. Defaults to True.
+            clip_adapter_overrides (_type_, optional): _description_. Defaults to dict().
+            learned_variance (bool, optional): _description_. Defaults to True.
+            learned_variance_constrain_frac (bool, optional): _description_. Defaults to False.
+            vb_loss_weight (float, optional): _description_. Defaults to 0.001.
+            unconditional (bool, optional): _description_. Defaults to False.
+            p2_loss_weight_gamma (float, optional): _description_. Defaults to 0.0.
+            fromhttps (arxiv.org, optional): _description_. Defaults to 1.
+            ddim_sampling_eta (float, optional): _description_. Defaults to 0.0.
+        """
         super().__init__()
 
         # clip
@@ -911,8 +935,12 @@ class VideoDecoder(nn.Module):
 
         # normalize and unnormalize image functions
 
-        self.normalize_img = normalize_neg_one_to_one if auto_normalize_img else identity
-        self.unnormalize_img = unnormalize_zero_to_one if auto_normalize_img else identity
+        self.normalize_video = (
+            normalize_neg_one_to_one if auto_normalize_video else identity
+        )
+        self.unnormalize_video = (
+            unnormalize_zero_to_one if auto_normalize_video else identity
+        )
 
         # verify conditioning method
 
@@ -1187,10 +1215,10 @@ class VideoDecoder(nn.Module):
         unet,
         x,
         t,
-        image_embed,
+        video_embed,
         noise_scheduler,
         text_encodings=None,
-        lowres_cond_img=None,
+        lowres_cond_video=None,
         self_cond=None,
         clip_denoised=True,
         predict_x_start=False,
@@ -1200,19 +1228,17 @@ class VideoDecoder(nn.Module):
         model_output=None,
         lowres_noise_level=None,
     ):
-        assert not (
-            cond_scale != 1.0 and not self.can_classifier_guidance
-        ), "the decoder was not trained with conditional dropout, and thus one cannot use classifier free guidance (cond_scale anything other than 1)"
+        assert not (cond_scale != 1.0 and not self.can_classifier_guidance), "the decoder was not trained with conditional dropout, and thus one cannot use classifier free guidance (cond_scale anything other than 1)"  # fmt: skip
 
         model_output = default(
             model_output,
             lambda: unet.forward_with_cond_scale(
                 x,
                 t,
-                image_embed=image_embed,
+                video=video_embed,
                 text_encodings=text_encodings,
                 cond_scale=cond_scale,
-                lowres_cond_img=lowres_cond_img,
+                lowres_cond_video=lowres_cond_video,
                 self_cond=self_cond,
                 lowres_noise_level=lowres_noise_level,
             ),
@@ -1222,6 +1248,7 @@ class VideoDecoder(nn.Module):
             learned_variance, model_output
         )
 
+        # v-prediction: https://arxiv.org/pdf/2202.00512.pdf
         if predict_v:
             x_start = noise_scheduler.predict_start_from_v(x, t=t, v=pred)
         elif predict_x_start:
@@ -1232,11 +1259,7 @@ class VideoDecoder(nn.Module):
         if clip_denoised:
             x_start = self.dynamic_threshold(x_start)
 
-        (
-            model_mean,
-            posterior_variance,
-            posterior_log_variance,
-        ) = noise_scheduler.q_posterior(x_start=x_start, x_t=x, t=t)
+        model_mean, posterior_variance, posterior_log_variance = noise_scheduler.q_posterior(x_start=x_start, x_t=x, t=t)  # fmt: skip
 
         if learned_variance:
             # if learned variance, posterio variance and posterior log variance are predicted by the network
@@ -1538,9 +1561,9 @@ class VideoDecoder(nn.Module):
 
     def p_losses(
         self,
-        unet,
-        x_start,
-        times,
+        unet: Union[Unet3D, UnetTemporalConv],
+        x_start: torch.Tensor,
+        times: torch.Tensor,
         *,
         video_embed,
         noise_scheduler,
@@ -1554,6 +1577,26 @@ class VideoDecoder(nn.Module):
         is_latent_diffusion=False,
         lowres_noise_level=None,
     ):
+        """_summary_
+        Args:
+            unet (Union[Unet3D, UnetTemporalConv]): _description_
+            x_start (torch.Tensor): _description_
+            times ( batch_size, ): Random integers to sample inputs from.
+            video_embed (_type_): _description_
+            noise_scheduler (_type_): _description_
+            lowres_cond_video (_type_, optional): _description_. Defaults to None.
+            text_encodings (_type_, optional): _description_. Defaults to None.
+            predict_x_start (bool, optional): _description_. Defaults to False.
+            predict_v (bool, optional): _description_. Defaults to False.
+            noise (_type_, optional): _description_. Defaults to None.
+            learned_variance (bool, optional): _description_. Defaults to False.
+            clip_denoised (bool, optional): _description_. Defaults to False.
+            is_latent_diffusion (bool, optional): _description_. Defaults to False.
+            lowres_noise_level (_type_, optional): _description_. Defaults to None.
+
+        Returns:
+            _type_: _description_
+        """
         noise = default(noise, lambda: torch.randn_like(x_start))
 
         # normalize to [-1, 1]
@@ -1630,7 +1673,7 @@ class VideoDecoder(nn.Module):
             unet,
             x=x_noisy,
             t=times,
-            image_embed=image_embed,
+            video_embed=video_embed,
             noise_scheduler=noise_scheduler,
             clip_denoised=clip_denoised,
             learned_variance=True,
@@ -1899,6 +1942,7 @@ class VideoDecoder(nn.Module):
             video = aug(video)
             lowres_cond_video = aug(lowres_cond_video, params=aug._params)
 
+        # NOTE: NullVQGanVAE does nothing, meaning we're doing pixel space diffusion.
         is_latent_diffusion = not isinstance(vae, NullVQGanVAE)
 
         vae.eval()
