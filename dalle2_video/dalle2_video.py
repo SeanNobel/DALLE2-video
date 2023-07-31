@@ -821,13 +821,19 @@ class UnetTemporalConv(Unet):
         *args,
         video_embed: torch.Tensor,
         lowres_cond_video: torch.Tensor,
+        video_cond_drop_prob: float,
         **kwargs,
     ):
         b, t, c, h, w = x.shape
 
         x = x.view(b * t, c, h, w)
         x = super().forward(
-            x, *args, image_embed=video_embed, lowres_cond_img=lowres_cond_video, **kwargs
+            x,
+            *args,
+            image_embed=video_embed,
+            lowres_cond_img=lowres_cond_video,
+            image_cond_drop_prob=video_cond_drop_prob,
+            **kwargs,
         )
 
         x = x.view(b, t, c, h, w).permute(0, 2, 1, 3, 4)
