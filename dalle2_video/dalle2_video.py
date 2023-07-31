@@ -1,4 +1,6 @@
 from typing import Any, Callable, Optional, Union, Tuple, List, Dict
+from termcolor import cprint
+
 import torch
 import torch.nn as nn
 
@@ -1663,8 +1665,6 @@ class VideoDecoder(nn.Module):
                 self_cond = self_cond.detach()
 
         # forward to get model prediction
-
-        cprint(x_noisy.shape)
 
         unet_output = unet(
             x_noisy,
