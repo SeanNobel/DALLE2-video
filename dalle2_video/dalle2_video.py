@@ -834,7 +834,7 @@ class VideoDecoder(nn.Module):
         unet: Union[Unet3D, UnetTemporalConv],
         *,
         clip=None,
-        frame_size=None,
+        frame_size: Optional[int] = None,
         channels=3,
         vae=tuple(),
         timesteps=1000,
@@ -919,12 +919,12 @@ class VideoDecoder(nn.Module):
 
         # determine image size, with image_size and image_sizes taking precedence
 
-        if exists(image_size) or exists(image_sizes):
-            assert exists(image_size) ^ exists(image_sizes), "only one of image_size or image_sizes must be given"  # fmt: skip
-            image_size = default(image_size, lambda: image_sizes[-1])
+        if exists(frame_size) or exists(frame_sizes):
+            assert exists(frame_size) ^ exists(frame_sizes), "only one of image_size or image_sizes must be given"  # fmt: skip
+            frame_size = default(frame_size, lambda: frame_sizes[-1])
 
         elif exists(clip):
-            image_size = clip.image_size
+            frame_size = clip.image_size
 
         else:
             raise Exception("either image_size, image_sizes, or clip must be given to decoder")  # fmt: skip
