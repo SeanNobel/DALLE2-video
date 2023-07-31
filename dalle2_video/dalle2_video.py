@@ -796,7 +796,7 @@ class Unet3D(nn.Module):
         x = final_resnet_block(x, t)
 
         if exists(lowres_cond_video):
-            x = torch.cat((x, lowres_cond_video), dim=1)
+            x = torch.cat((x, lowres_cond_), dim=1)
 
         return self.to_out(x)
 
@@ -815,7 +815,7 @@ class UnetTemporalConv(Unet):
             padding="same",
         )
 
-    def forward(self, x: torch.Tensor, video_embed: torch.Tensor, *args, **kwargs):
+    def forward(self, x: torch.Tensor, *args, video_embed: torch.Tensor, **kwargs):
         b, t, c, h, w = x.shape
 
         x = x.view(b * t, c, h, w)
