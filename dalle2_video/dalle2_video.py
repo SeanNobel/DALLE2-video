@@ -838,7 +838,7 @@ class UnetTemporalConv(Unet):
         b, t, c, h, w = x.shape
 
         x = x.view(b * t, c, h, w)
-        video_embed = video_embed.premute(0, 2, 1).view(b * t, -1)
+        video_embed = video_embed.permute(0, 2, 1).view(b * t, -1)
 
         cprint(video_embed.shape, "yellow")
 
