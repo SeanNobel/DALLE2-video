@@ -1963,7 +1963,7 @@ class VideoDecoder(nn.Module):
             times,
             video_embed=video_embed,
             text_encodings=text_encodings,
-            lowres_cond_img=lowres_cond_video,
+            lowres_cond_video=lowres_cond_video,
             predict_x_start=predict_x_start,
             predict_v=predict_v,
             learned_variance=learned_variance,
