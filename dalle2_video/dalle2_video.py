@@ -1090,7 +1090,7 @@ class VideoDecoder(nn.Module):
 
         # input image range
 
-        self.input_image_range = (-1.0 if not auto_normalize_img else 0.0, 1.0)
+        self.input_image_range = (-1.0 if not auto_normalize_video else 0.0, 1.0)
 
         # cascading ddpm related stuff
 
@@ -1114,8 +1114,8 @@ class VideoDecoder(nn.Module):
                 blur_sigma=blur_sigma,
                 blur_kernel_size=blur_kernel_size,
                 input_image_range=self.input_image_range,
-                normalize_img_fn=self.normalize_img,
-                unnormalize_img_fn=self.unnormalize_img,
+                normalize_img_fn=self.normalize_video,
+                unnormalize_img_fn=self.unnormalize_video,
             )
 
             self.lowres_conds.append(lowres_cond)
@@ -1350,15 +1350,16 @@ class VideoDecoder(nn.Module):
         is_inpaint = exists(inpaint_image)
         resample_times = inpaint_resample_times if is_inpaint else 1
 
-        if is_inpaint:
-            inpaint_image = self.normalize_img(inpaint_image)
-            inpaint_image = resize_image_to(inpaint_image, shape[-1], nearest=True)
-            inpaint_mask = rearrange(inpaint_mask, "b h w -> b 1 h w").float()
-            inpaint_mask = resize_image_to(inpaint_mask, shape[-1], nearest=True)
-            inpaint_mask = inpaint_mask.bool()
+        # NOTE: Inpainting is not supported for video.
+        # if is_inpaint:
+        #     inpaint_image = self.normalize_img(inpaint_image)
+        #     inpaint_image = resize_image_to(inpaint_image, shape[-1], nearest=True)
+        #     inpaint_mask = rearrange(inpaint_mask, "b h w -> b 1 h w").float()
+        #     inpaint_mask = resize_image_to(inpaint_mask, shape[-1], nearest=True)
+        #     inpaint_mask = inpaint_mask.bool()
 
         if not is_latent_diffusion:
-            lowres_cond_img = maybe(self.normalize_img)(lowres_cond_img)
+            lowres_cond_img = maybe(self.normalize_video)(lowres_cond_img)
 
         for time in tqdm(
             reversed(range(0, noise_scheduler.num_timesteps)),
@@ -1448,19 +1449,20 @@ class VideoDecoder(nn.Module):
         is_inpaint = exists(inpaint_image)
         resample_times = inpaint_resample_times if is_inpaint else 1
 
-        if is_inpaint:
-            inpaint_image = self.normalize_img(inpaint_image)
-            inpaint_image = resize_image_to(inpaint_image, shape[-1], nearest=True)
-            inpaint_mask = rearrange(inpaint_mask, "b h w -> b 1 h w").float()
-            inpaint_mask = resize_image_to(inpaint_mask, shape[-1], nearest=True)
-            inpaint_mask = inpaint_mask.bool()
+        # NOTE: Inpainting is not supported for video.
+        # if is_inpaint:
+        #     inpaint_image = self.normalize_img(inpaint_image)
+        #     inpaint_image = resize_image_to(inpaint_image, shape[-1], nearest=True)
+        #     inpaint_mask = rearrange(inpaint_mask, "b h w -> b 1 h w").float()
+        #     inpaint_mask = resize_image_to(inpaint_mask, shape[-1], nearest=True)
+        #     inpaint_mask = inpaint_mask.bool()
 
         img = torch.randn(shape, device=device)
 
         x_start = None  # for self-conditioning
 
         if not is_latent_diffusion:
-            lowres_cond_img = maybe(self.normalize_img)(lowres_cond_img)
+            lowres_cond_img = maybe(self.normalize_video)(lowres_cond_img)
 
         for time, time_next in tqdm(time_pairs, desc="sampling loop time step"):
             is_last_timestep = time_next == 0
