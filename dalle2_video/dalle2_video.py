@@ -853,7 +853,7 @@ class UnetTemporalConv(Unet):
         Args:
             x ( b, t, c, h, w ): _description_
             video_embed ( b, d, t ): _description_
-            lowres_cond_video (torch.Tensor): _description_
+            lowres_cond_video ( b, t, c, h_low, w_low ): _description_
             video_cond_drop_prob (float): _description_
         Returns:
             _type_: _description_
@@ -941,12 +941,9 @@ class LowresVideoConditioner(nn.Module):
         cond_fmap = self.unnormalize_video(cond_fmap)
         return cond_fmap, random_noise_levels
 
-    def blur_image(self, cond_fmap: torch.Tensor, blur_sigma, blur_kernel_size):
+    @staticmethod
+    def blur_image(cond_fmap: torch.Tensor, blur_sigma, blur_kernel_size):
         # when training, blur the low resolution conditional image
-
-        blur_sigma = default(blur_sigma, self.blur_sigma)
-        blur_kernel_size = default(blur_kernel_size, self.blur_kernel_size)
-
         # allow for drawing a random sigma between lo and hi float values
 
         if isinstance(blur_sigma, tuple):
@@ -992,9 +989,11 @@ class LowresVideoConditioner(nn.Module):
 
         if self.use_blur and should_blur and random.random() < self.blur_prob:
             cond_fmap = temporal_apply(
-                self.blur_image, cond_fmap, blur_sigma, blur_kernel_size
+                self.blur_image,
+                cond_fmap,
+                default(blur_sigma, self.blur_sigma),
+                default(blur_kernel_size, self.blur_kernel_size),
             )
-            cprint("aaa", "yellow")
 
         # resize to target image size
 
@@ -2136,6 +2135,7 @@ class VideoDecoder(nn.Module):
             # detailed https://kornia.readthedocs.io/en/latest/augmentation.module.html?highlight=randomcrop#kornia.augmentation.RandomCrop
             video = aug(video)
             lowres_cond_video = aug(lowres_cond_video, params=aug._params)
+            cprint(lowres_cond_video.shape, "red")
 
         # NOTE: NullVQGanVAE does nothing, meaning we're doing pixel space diffusion.
         is_latent_diffusion = not isinstance(vae, NullVQGanVAE)
