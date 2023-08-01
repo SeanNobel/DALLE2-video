@@ -840,7 +840,8 @@ class UnetTemporalConv(Unet):
         x = x.view(b * t, c, h, w)
         video_embed = video_embed.view(b * t, -1)
 
-        cprint(times, "yellow")
+        times = torch.repeat_interleave(times, repeats=t, dim=0)
+        cprint(times.shape, "yellow")
 
         x = super().forward(
             x,
