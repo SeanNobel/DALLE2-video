@@ -828,8 +828,8 @@ class UnetTemporalConv(Unet):
     ):
         """_summary_
         Args:
-            x (torch.Tensor): _description_
-            video_embed:  ( b, d, t )
+            x ( b, t, c, h, w ): _description_
+            video_embed ( b, d, t ): _description_
             lowres_cond_video (torch.Tensor): _description_
             video_cond_drop_prob (float): _description_
         Returns:
@@ -838,9 +838,7 @@ class UnetTemporalConv(Unet):
         b, t, c, h, w = x.shape
 
         x = x.view(b * t, c, h, w)
-        video_embed = video_embed.permute(0, 2, 1).view(b * t, -1)
-
-        cprint(video_embed.shape, "yellow")
+        video_embed = video_embed.view(b * t, -1)
 
         x = super().forward(
             x,
