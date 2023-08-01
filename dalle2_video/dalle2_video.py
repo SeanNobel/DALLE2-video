@@ -1684,7 +1684,6 @@ class VideoDecoder(nn.Module):
         )
 
         pred, _ = self.parse_unet_output(learned_variance, unet_output)
-        cprint(pred.shape, "yellow")
 
         if predict_v:
             target = noise_scheduler.calculate_v(x_start, times, noise)
@@ -1947,6 +1946,7 @@ class VideoDecoder(nn.Module):
         learned_variance = self.learned_variance[unet_index]
         b, t, c, h, w, device = *video.shape, video.device
 
+        cprint(video.shape, "yellow")
         assert video.shape[2] == self.channels
         assert h >= target_frame_size and w >= target_frame_size
 
