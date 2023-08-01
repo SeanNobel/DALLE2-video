@@ -1205,7 +1205,7 @@ class VideoDecoder(nn.Module):
         var_interp_frac_unnormalized = None
 
         if learned_variance:
-            output, var_interp_frac_unnormalized = output.chunk(2, dim=1)
+            output, var_interp_frac_unnormalized = output.chunk(2, dim=2)
 
         return UnetOutput(output, var_interp_frac_unnormalized)
 
