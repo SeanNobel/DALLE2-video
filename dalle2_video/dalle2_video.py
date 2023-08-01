@@ -889,7 +889,7 @@ class UnetTemporalConv(Unet):
             # ( b, c, t, h, w )
 
         else:
-            x = x.view(b, t, c * 2, *x.shape[2:]).permute(0, 2, 1, 3, 4)
+            x = x.view(b, t, c, *x.shape[2:]).permute(0, 2, 1, 3, 4)
             # ( b, c * 2, t, h, w )
 
         x = self.temporal_conv(x)
