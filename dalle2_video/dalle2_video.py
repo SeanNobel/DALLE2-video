@@ -2135,7 +2135,6 @@ class VideoDecoder(nn.Module):
             # detailed https://kornia.readthedocs.io/en/latest/augmentation.module.html?highlight=randomcrop#kornia.augmentation.RandomCrop
             video = aug(video)
             lowres_cond_video = aug(lowres_cond_video, params=aug._params)
-            cprint(lowres_cond_video.shape, "red")
 
         # NOTE: NullVQGanVAE does nothing, meaning we're doing pixel space diffusion.
         is_latent_diffusion = not isinstance(vae, NullVQGanVAE)
@@ -2153,6 +2152,7 @@ class VideoDecoder(nn.Module):
                 lowres_cond_video = lowres_cond_video.view(
                     b, t, *lowres_cond_video.shape[1:]
                 )
+                cprint(lowres_cond_video.shape, "red")
 
         losses = self.p_losses(
             unet,
