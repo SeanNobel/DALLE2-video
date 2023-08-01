@@ -845,7 +845,7 @@ class UnetTemporalConv(Unet):
         x: torch.Tensor,
         times: torch.Tensor,
         video_embed: torch.Tensor,
-        lowres_cond_video: torch.Tensor,
+        lowres_cond_video: Optional[torch.Tensor],
         video_cond_drop_prob: float,
         **kwargs,
     ):
@@ -863,8 +863,10 @@ class UnetTemporalConv(Unet):
         x = x.view(b * t, c, h, w)
         video_embed = video_embed.view(b * t, -1)
 
-        # if exists(lowres_cond_video):
-        lowres_cond_video = lowres_cond_video.view(b * t, *lowres_cond_video.shape[2:])
+        if exists(lowres_cond_video):
+            lowres_cond_video = lowres_cond_video.view(
+                b * t, *lowres_cond_video.shape[2:]
+            )
 
         times = torch.repeat_interleave(times, repeats=t, dim=0)
 
