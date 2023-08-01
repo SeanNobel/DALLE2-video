@@ -1790,13 +1790,15 @@ class VideoDecoder(nn.Module):
 
         # normalize to [-1, 1]
 
-        maybe(cprint(lowres_cond_video.shape, "yellow"))
+        if exists(lowres_cond_video):
+            cprint(lowres_cond_video.shape, "yellow")
 
         if not is_latent_diffusion:
             x_start = self.normalize_video(x_start)
             lowres_cond_video = maybe(self.normalize_video)(lowres_cond_video)
 
-        maybe(cprint(lowres_cond_video.shape, "yellow"))
+        if exists(lowres_cond_video):
+            cprint(lowres_cond_video.shape, "yellow")
 
         # get x_t
 
