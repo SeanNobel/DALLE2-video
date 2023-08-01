@@ -1992,7 +1992,9 @@ class VideoDecoder(nn.Module):
         vae.eval()
         with torch.no_grad():
             # NOTE: VAE doesn't do temporal information mixing.
-            video = vae.encode(video.view(-1, c, h, w)).view(b, t, c, h, w)
+            video = vae.encode(video.view(-1, c, target_frame_size, target_frame_size))
+            cprint(video.shape, "yellow")
+            video = video.view(b, t, c, h, w)
 
             if exists(lowres_cond_video):
                 _, t_low, c_low, h_low, w_low = lowres_cond_video.shape
