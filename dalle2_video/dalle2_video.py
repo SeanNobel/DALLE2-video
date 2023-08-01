@@ -879,18 +879,18 @@ class UnetTemporalConv(Unet):
             **kwargs,
         )
         # ( b * t, c * 2, h, w )
-        cprint(f"{x.shape}, {self.learned_var}", "red")
+        cprint(f"{x.shape}, {self.learned_var}, {self.channels_out}", "red")
 
         # FIXME: Getting rid of learned variance here.
-        if not self.learned_var:
+        if self.learned_var:
             x = x.chunk(2, dim=1)[0]
 
-            x = x.view(b, t, *x.shape[1:]).permute(0, 2, 1, 3, 4)
-            # ( b, c, t, h, w )
+        x = x.view(b, t, *x.shape[1:]).permute(0, 2, 1, 3, 4)
+        # ( b, c, t, h, w )
 
-        else:
-            x = x.view(b, t, c, *x.shape[2:]).permute(0, 2, 1, 3, 4)
-            # ( b, c * 2, t, h, w )
+        # else:
+        #     x = x.view(b, t, c * 2, *x.shape[2:]).permute(0, 2, 1, 3, 4)
+        #     # ( b, c * 2, t, h, w )
 
         x = self.temporal_conv(x)
 
