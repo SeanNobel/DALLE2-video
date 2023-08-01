@@ -865,6 +865,9 @@ class UnetTemporalConv(Unet):
 
         times = torch.repeat_interleave(times, repeats=t, dim=0)
 
+        if exists(lowres_cond_video):
+            cprint(lowres_cond_video.shape, "red")
+
         x = super().forward(
             x,
             times,
@@ -1790,15 +1793,9 @@ class VideoDecoder(nn.Module):
 
         # normalize to [-1, 1]
 
-        if exists(lowres_cond_video):
-            cprint(lowres_cond_video.shape, "yellow")
-
         if not is_latent_diffusion:
             x_start = self.normalize_video(x_start)
             lowres_cond_video = maybe(self.normalize_video)(lowres_cond_video)
-
-        if exists(lowres_cond_video):
-            cprint(lowres_cond_video.shape, "yellow")
 
         # get x_t
 
