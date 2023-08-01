@@ -1684,6 +1684,7 @@ class VideoDecoder(nn.Module):
         )
 
         pred, _ = self.parse_unet_output(learned_variance, unet_output)
+        cprint(pred.shape, "yellow")
 
         if predict_v:
             target = noise_scheduler.calculate_v(x_start, times, noise)
