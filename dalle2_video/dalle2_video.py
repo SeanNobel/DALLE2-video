@@ -816,6 +816,7 @@ class UnetTemporalConv(Unet):
             stride=1,
             padding="same",
         )
+        cprint(self.channels_out, "yellow")
 
     def forward(
         self,
@@ -856,6 +857,7 @@ class UnetTemporalConv(Unet):
         x = x.chunk(2, dim=1)[0]
 
         x = x.view(b, t, c, h, w).permute(0, 2, 1, 3, 4)
+        # ( b, c, t, h, w )
 
         x = self.temporal_conv(x)
 
