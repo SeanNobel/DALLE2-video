@@ -670,8 +670,8 @@ class Unet3D(nn.Module):
         image_tokens = None
 
         if self.cond_on_image_embeds:
-            image_keep_mask_embed = rearrange(image_keep_mask, "b -> b 1 1")
-            image_tokens = self.image_to_tokens(image_embed)
+            image_keep_mask_embed = rearrange(video_keep_mask, "b -> b 1 1")
+            image_tokens = self.image_to_tokens(video_embed)
             null_image_embed = self.null_image_embed.to(
                 image_tokens.dtype
             )  # for some reason pytorch AMP not working
@@ -884,11 +884,11 @@ class UnetTemporalConv(Unet):
         if not self.learned_var:
             x = x.chunk(2, dim=1)[0]
 
-            x = x.view(b, t, x.shape[1:]).permute(0, 2, 1, 3, 4)
+            x = x.view(b, t, *x.shape[1:]).permute(0, 2, 1, 3, 4)
             # ( b, c, t, h, w )
 
         else:
-            x = x.view(b, t, c * 2, x.shape[2:]).permute(0, 2, 1, 3, 4)
+            x = x.view(b, t, c * 2, *x.shape[2:]).permute(0, 2, 1, 3, 4)
             # ( b, c * 2, t, h, w )
 
         x = self.temporal_conv(x)
