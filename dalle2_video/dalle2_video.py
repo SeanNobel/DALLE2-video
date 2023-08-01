@@ -870,6 +870,142 @@ class UnetTemporalConv(Unet):
         return x.permute(0, 2, 1, 3, 4)
 
 
+def resize_video_to(
+    video: torch.Tensor,
+    target_frame_size: int,
+    **kwargs,
+):
+    """_summary_
+    Args:
+        video ( b, t, c, h, w ): _description_
+        target_frame_size (int): _description_
+        clamp_range (Optional[float], optional): _description_. Defaults to None.
+        nearest (bool, optional): _description_. Defaults to False.
+
+    Returns:
+        _type_: _description_
+    """
+    return torch.stack(
+        [
+            resize_image_to(video[:, _t], target_frame_size, **kwargs)
+            for _t in range(video.shape[1])
+        ],
+        dim=1,
+    )
+
+
+class LowresVideoConditioner(nn.Module):
+    def __init__(
+        self,
+        downsample_first=True,
+        use_blur=True,
+        blur_prob=0.5,
+        blur_sigma=0.6,
+        blur_kernel_size=3,
+        use_noise=False,
+        input_image_range=None,
+        normalize_video_fn=identity,
+        unnormalize_video_fn=identity,
+    ):
+        super().__init__()
+        self.downsample_first = downsample_first
+        self.input_image_range = input_image_range
+
+        self.use_blur = use_blur
+        self.blur_prob = blur_prob
+        self.blur_sigma = blur_sigma
+        self.blur_kernel_size = blur_kernel_size
+
+        self.use_noise = use_noise
+        self.normalize_video = normalize_video_fn
+        self.unnormalize_video = unnormalize_video_fn
+        self.noise_scheduler = (
+            NoiseScheduler(beta_schedule="linear", timesteps=1000, loss_type="l2")
+            if use_noise
+            else None
+        )
+
+    def noise_image(self, cond_fmap, noise_levels=None):
+        assert exists(self.noise_scheduler)
+
+        batch = cond_fmap.shape[0]
+        cond_fmap = self.normalize_video(cond_fmap)
+
+        random_noise_levels = default(
+            noise_levels, lambda: self.noise_scheduler.sample_random_times(batch)
+        )
+        cond_fmap = self.noise_scheduler.q_sample(
+            cond_fmap, t=random_noise_levels, noise=torch.randn_like(cond_fmap)
+        )
+
+        cond_fmap = self.unnormalize_video(cond_fmap)
+        return cond_fmap, random_noise_levels
+
+    def forward(
+        self,
+        cond_fmap: torch.Tensor,
+        *,
+        target_frame_size,
+        downsample_frame_size: Optional[int] = None,
+        target_frame_number: Optional[int] = None,
+        downsample_frame_number: Optional[int] = None,
+        should_blur=True,
+        blur_sigma=None,
+        blur_kernel_size=None,
+    ):
+        if self.downsample_first and exists(downsample_frame_size):
+            cond_fmap = resize_video_to(
+                cond_fmap,
+                downsample_frame_size,
+                clamp_range=self.input_image_range,
+                nearest=True,
+            )
+
+        # blur is only applied 50% of the time
+        # section 3.1 in https://arxiv.org/abs/2106.15282
+
+        if self.use_blur and should_blur and random.random() < self.blur_prob:
+            # when training, blur the low resolution conditional image
+
+            blur_sigma = default(blur_sigma, self.blur_sigma)
+            blur_kernel_size = default(blur_kernel_size, self.blur_kernel_size)
+
+            # allow for drawing a random sigma between lo and hi float values
+
+            if isinstance(blur_sigma, tuple):
+                blur_sigma = tuple(map(float, blur_sigma))
+                blur_sigma = random.uniform(*blur_sigma)
+
+            # allow for drawing a random kernel size between lo and hi int values
+
+            if isinstance(blur_kernel_size, tuple):
+                blur_kernel_size = tuple(map(int, blur_kernel_size))
+                kernel_size_lo, kernel_size_hi = blur_kernel_size
+                blur_kernel_size = random.randrange(kernel_size_lo, kernel_size_hi + 1)
+
+            cond_fmap = gaussian_blur2d(
+                cond_fmap, cast_tuple(blur_kernel_size, 2), cast_tuple(blur_sigma, 2)
+            )
+
+        # resize to target image size
+
+        cond_fmap = resize_video_to(
+            cond_fmap, target_frame_size, clamp_range=self.input_image_range, nearest=True
+        )
+
+        # noise conditioning, as done in Imagen
+        # as a replacement for the BSR noising, and potentially replace blurring for first stage too
+
+        random_noise_levels = None
+
+        if self.use_noise:
+            cond_fmap, random_noise_levels = self.noise_image(cond_fmap)
+
+        # return conditioning feature map, as well as the augmentation noise levels
+
+        return cond_fmap, random_noise_levels
+
+
 class VideoDecoder(nn.Module):
     def __init__(
         self,
@@ -1148,7 +1284,7 @@ class VideoDecoder(nn.Module):
                 self.lowres_conds.append(None)
                 continue
 
-            lowres_cond = LowresConditioner(
+            lowres_cond = LowresVideoConditioner(
                 downsample_first=lowres_downsample_first,
                 use_blur=use_blur,
                 use_noise=use_noise,
@@ -1156,8 +1292,8 @@ class VideoDecoder(nn.Module):
                 blur_sigma=blur_sigma,
                 blur_kernel_size=blur_kernel_size,
                 input_image_range=self.input_image_range,
-                normalize_img_fn=self.normalize_video,
-                unnormalize_img_fn=self.unnormalize_video,
+                normalize_video_fn=self.normalize_video,
+                unnormalize_video_fn=self.unnormalize_video,
             )
 
             self.lowres_conds.append(lowres_cond)
@@ -1449,7 +1585,7 @@ class VideoDecoder(nn.Module):
         if is_inpaint:
             img = (img * ~inpaint_mask) + (inpaint_image * inpaint_mask)
 
-        unnormalize_img = self.unnormalize_img(img)
+        unnormalize_img = self.unnormalize_video(img)
         return unnormalize_img
 
     @torch.no_grad()
@@ -1583,7 +1719,7 @@ class VideoDecoder(nn.Module):
         if exists(inpaint_image):
             img = (img * ~inpaint_mask) + (inpaint_image * inpaint_mask)
 
-        img = self.unnormalize_img(img)
+        img = self.unnormalize_video(img)
         return img
 
     @torch.no_grad()
@@ -1797,7 +1933,7 @@ class VideoDecoder(nn.Module):
             ), "image must have batch size of {} if starting at unet number > 1".format(
                 batch_size
             )
-            prev_unet_output_size = self.image_sizes[start_at_unet_number - 2]
+            prev_unet_output_size = self.frame_sizes[start_at_unet_number - 2]
             img = resize_image_to(image, prev_unet_output_size, nearest=True)
 
         is_cuda = next(self.parameters()).is_cuda
@@ -1824,7 +1960,7 @@ class VideoDecoder(nn.Module):
                 self.unets,
                 self.vaes,
                 self.sample_channels,
-                self.image_sizes,
+                self.frame_sizes,
                 self.predict_x_start,
                 self.predict_v,
                 self.learned_variance,
@@ -1971,18 +2107,14 @@ class VideoDecoder(nn.Module):
                 video,
                 target_frame_size=target_frame_size,
                 downsample_frame_size=self.frame_sizes[unet_index - 1],
+                target_frame_number=target_frame_number,
+                downsample_frame_number=self.frame_numbers[unet_index - 1],
             )
             if exists(lowres_conditioner)
             else (None, None)
         )
         # TODO: Check if the original utility function can be used here.
-        video = torch.stack(
-            [
-                resize_image_to(video[:, _t], target_frame_size, nearest=True)
-                for _t in range(t)
-            ],
-            dim=1,
-        )
+        video = resize_video_to(video, target_frame_size, nearest=True)
 
         if exists(random_crop_size):
             aug = K.RandomCrop((random_crop_size, random_crop_size), p=1.0)
@@ -1998,18 +2130,15 @@ class VideoDecoder(nn.Module):
         vae.eval()
         with torch.no_grad():
             # NOTE: VAE doesn't do temporal information mixing.
-            video = vae.encode(video.view(-1, c, target_frame_size, target_frame_size))
+            video = vae.encode(video.view(-1, *video.shape[2:]))
             video = video.view(b, t, *video.shape[1:])
 
             if exists(lowres_cond_video):
-                _, t_low, c_low, h_low, w_low = lowres_cond_video.shape
-                cprint(lowres_cond_video.shape, "yellow")
-
                 lowres_cond_video = vae.encode(
-                    lowres_cond_video.view(-1, c_low, h_low, w_low)
+                    lowres_cond_video.view(-1, *lowres_cond_video.shape[2:])
                 )
                 lowres_cond_video = lowres_cond_video.view(
-                    b, t_low, lowres_cond_video.shape[1:]
+                    b, t, lowres_cond_video.shape[1:]
                 )
 
         losses = self.p_losses(
