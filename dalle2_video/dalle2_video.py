@@ -991,6 +991,7 @@ class LowresVideoConditioner(nn.Module):
             cond_fmap = temporal_apply(
                 self.blur_image, cond_fmap, blur_sigma, blur_kernel_size
             )
+            cprint("aaa", "yellow")
 
         # resize to target image size
 
