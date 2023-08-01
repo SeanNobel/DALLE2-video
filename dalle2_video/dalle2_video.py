@@ -1983,7 +1983,6 @@ class VideoDecoder(nn.Module):
             ],
             dim=1,
         )
-        cprint(video.shape, "yellow")
 
         if exists(random_crop_size):
             aug = K.RandomCrop((random_crop_size, random_crop_size), p=1.0)
@@ -2000,8 +1999,7 @@ class VideoDecoder(nn.Module):
         with torch.no_grad():
             # NOTE: VAE doesn't do temporal information mixing.
             video = vae.encode(video.view(-1, c, target_frame_size, target_frame_size))
-            cprint(video.shape, "yellow")
-            video = video.view(b, t, c, h, w)
+            video = video.view(b, t, *video.shape[1:])
 
             if exists(lowres_cond_video):
                 _, t_low, c_low, h_low, w_low = lowres_cond_video.shape
@@ -2009,7 +2007,10 @@ class VideoDecoder(nn.Module):
 
                 lowres_cond_video = vae.encode(
                     lowres_cond_video.view(-1, c_low, h_low, w_low)
-                ).view(b, t_low, c_low, h_low, w_low)
+                )
+                lowres_cond_video = lowres_cond_video.view(
+                    b, t_low, lowres_cond_video.shape[1:]
+                )
 
         losses = self.p_losses(
             unet,
