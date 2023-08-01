@@ -863,10 +863,10 @@ class UnetTemporalConv(Unet):
         x = x.view(b * t, c, h, w)
         video_embed = video_embed.view(b * t, -1)
 
-        times = torch.repeat_interleave(times, repeats=t, dim=0)
+        # if exists(lowres_cond_video):
+        lowres_cond_video = lowres_cond_video.view(b * t, *lowres_cond_video.shape[2:])
 
-        if exists(lowres_cond_video):
-            cprint(lowres_cond_video.shape, "red")
+        times = torch.repeat_interleave(times, repeats=t, dim=0)
 
         x = super().forward(
             x,
