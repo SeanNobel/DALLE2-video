@@ -879,7 +879,7 @@ class UnetTemporalConv(Unet):
             **kwargs,
         )
         # ( b * t, c * 2, h, w )
-        cprint(x.shape, "red")
+        cprint(f"{x.shape}, {self.learned_var}", "red")
 
         # FIXME: Getting rid of learned variance here.
         if not self.learned_var:
