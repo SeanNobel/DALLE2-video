@@ -820,7 +820,7 @@ class UnetTemporalConv(Unet):
     def forward(
         self,
         x: torch.Tensor,
-        *args,
+        times: torch.Tensor,
         video_embed: torch.Tensor,
         lowres_cond_video: torch.Tensor,
         video_cond_drop_prob: float,
@@ -840,9 +840,11 @@ class UnetTemporalConv(Unet):
         x = x.view(b * t, c, h, w)
         video_embed = video_embed.view(b * t, -1)
 
+        cprint(times, "yellow")
+
         x = super().forward(
             x,
-            *args,
+            times,
             image_embed=video_embed,
             lowres_cond_img=lowres_cond_video,
             image_cond_drop_prob=video_cond_drop_prob,
