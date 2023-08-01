@@ -2147,7 +2147,7 @@ class VideoDecoder(nn.Module):
                     lowres_cond_video.view(-1, *lowres_cond_video.shape[2:])
                 )
                 lowres_cond_video = lowres_cond_video.view(
-                    b, t, lowres_cond_video.shape[1:]
+                    b, t, *lowres_cond_video.shape[1:]
                 )
 
         losses = self.p_losses(
