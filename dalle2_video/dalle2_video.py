@@ -850,8 +850,10 @@ class UnetTemporalConv(Unet):
             image_cond_drop_prob=video_cond_drop_prob,
             **kwargs,
         )
+        # ( b * t, c * 2, h, w )
 
-        cprint(x.shape, "yellow")
+        # FIXME: Getting rid of learned variance here.
+        x = x.chunk(2, dim=1)[0]
 
         x = x.view(b, t, c, h, w).permute(0, 2, 1, 3, 4)
 
