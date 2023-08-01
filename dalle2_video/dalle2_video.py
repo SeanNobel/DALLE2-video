@@ -1989,20 +1989,18 @@ class VideoDecoder(nn.Module):
         # NOTE: NullVQGanVAE does nothing, meaning we're doing pixel space diffusion.
         is_latent_diffusion = not isinstance(vae, NullVQGanVAE)
 
-        _, t_low, c_low, h_low, w_low = lowres_cond_video.shape
-        cprint(lowres_cond_video.shape, "yellow")
-
         vae.eval()
         with torch.no_grad():
             # NOTE: VAE doesn't do temporal information mixing.
             video = vae.encode(video.view(-1, c, h, w)).view(b, t, c, h, w)
-            lowres_cond_video = (
-                vae.encode(lowres_cond_video.view(-1, c_low, h_low, w_low)).view(
-                    b, t_low, c_low, h_low, w_low
-                )
-                if exists(lowres_cond_video)
-                else lowres_cond_video
-            )
+
+            if exists(lowres_cond_video):
+                _, t_low, c_low, h_low, w_low = lowres_cond_video.shape
+                cprint(lowres_cond_video.shape, "yellow")
+
+                lowres_cond_video = vae.encode(
+                    lowres_cond_video.view(-1, c_low, h_low, w_low)
+                ).view(b, t_low, c_low, h_low, w_low)
 
         losses = self.p_losses(
             unet,
