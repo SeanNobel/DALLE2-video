@@ -858,9 +858,9 @@ class UnetTemporalConv(Unet):
         Returns:
             _type_: _description_
         """
-        b, t, c, h, w = x.shape
+        b, t, c, _, _ = x.shape
 
-        x = x.view(b * t, c, h, w)
+        x = x.view(b * t, *x.shape[2:])
         video_embed = video_embed.view(b * t, -1)
 
         if exists(lowres_cond_video):
@@ -884,11 +884,11 @@ class UnetTemporalConv(Unet):
         if not self.learned_var:
             x = x.chunk(2, dim=1)[0]
 
-            x = x.view(b, t, c, h, w).permute(0, 2, 1, 3, 4)
+            x = x.view(b, t, x.shape[1:]).permute(0, 2, 1, 3, 4)
             # ( b, c, t, h, w )
 
         else:
-            x = x.view(b, t, c * 2, h, w).permute(0, 2, 1, 3, 4)
+            x = x.view(b, t, c * 2, x.shape[2:]).permute(0, 2, 1, 3, 4)
             # ( b, c * 2, t, h, w )
 
         x = self.temporal_conv(x)
