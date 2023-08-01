@@ -11,6 +11,27 @@ from dalle2_pytorch.dalle2_pytorch import *
 from dalle2_pytorch.vqgan_vae import NullVQGanVAE, VQGanVAE
 
 
+def temporal_apply(
+    fn: Callable,
+    x: torch.Tensor,
+    *args,
+    **kwargs,
+):
+    """Apply any function sequentially to each frame of a video.
+    Args:
+        video ( b, t, * ): _description_
+        target_frame_size (int): _description_
+        clamp_range (Optional[float], optional): _description_. Defaults to None.
+        nearest (bool, optional): _description_. Defaults to False.
+    Returns:
+        _type_: _description_
+    """
+    return torch.stack(
+        [fn(x[:, _t], *args, **kwargs) for _t in range(x.shape[1])],
+        dim=1,
+    )
+
+
 class Block3D(nn.Module):
     def __init__(self, dim, dim_out, groups=8, weight_standardization=False):
         super().__init__()
@@ -870,30 +891,6 @@ class UnetTemporalConv(Unet):
         return x.permute(0, 2, 1, 3, 4)
 
 
-def resize_video_to(
-    video: torch.Tensor,
-    target_frame_size: int,
-    **kwargs,
-):
-    """_summary_
-    Args:
-        video ( b, t, c, h, w ): _description_
-        target_frame_size (int): _description_
-        clamp_range (Optional[float], optional): _description_. Defaults to None.
-        nearest (bool, optional): _description_. Defaults to False.
-
-    Returns:
-        _type_: _description_
-    """
-    return torch.stack(
-        [
-            resize_image_to(video[:, _t], target_frame_size, **kwargs)
-            for _t in range(video.shape[1])
-        ],
-        dim=1,
-    )
-
-
 class LowresVideoConditioner(nn.Module):
     def __init__(
         self,
@@ -941,6 +938,31 @@ class LowresVideoConditioner(nn.Module):
         cond_fmap = self.unnormalize_video(cond_fmap)
         return cond_fmap, random_noise_levels
 
+    def blur_image(self, cond_fmap: torch.Tensor, blur_sigma, blur_kernel_size):
+        # when training, blur the low resolution conditional image
+
+        blur_sigma = default(blur_sigma, self.blur_sigma)
+        blur_kernel_size = default(blur_kernel_size, self.blur_kernel_size)
+
+        # allow for drawing a random sigma between lo and hi float values
+
+        if isinstance(blur_sigma, tuple):
+            blur_sigma = tuple(map(float, blur_sigma))
+            blur_sigma = random.uniform(*blur_sigma)
+
+        # allow for drawing a random kernel size between lo and hi int values
+
+        if isinstance(blur_kernel_size, tuple):
+            blur_kernel_size = tuple(map(int, blur_kernel_size))
+            kernel_size_lo, kernel_size_hi = blur_kernel_size
+            blur_kernel_size = random.randrange(kernel_size_lo, kernel_size_hi + 1)
+
+        cond_fmap = gaussian_blur2d(
+            cond_fmap, cast_tuple(blur_kernel_size, 2), cast_tuple(blur_sigma, 2)
+        )
+
+        return cond_fmap
+
     def forward(
         self,
         cond_fmap: torch.Tensor,
@@ -954,7 +976,8 @@ class LowresVideoConditioner(nn.Module):
         blur_kernel_size=None,
     ):
         if self.downsample_first and exists(downsample_frame_size):
-            cond_fmap = resize_video_to(
+            cond_fmap = temporal_apply(
+                resize_image_to,
                 cond_fmap,
                 downsample_frame_size,
                 clamp_range=self.input_image_range,
@@ -965,32 +988,18 @@ class LowresVideoConditioner(nn.Module):
         # section 3.1 in https://arxiv.org/abs/2106.15282
 
         if self.use_blur and should_blur and random.random() < self.blur_prob:
-            # when training, blur the low resolution conditional image
-
-            blur_sigma = default(blur_sigma, self.blur_sigma)
-            blur_kernel_size = default(blur_kernel_size, self.blur_kernel_size)
-
-            # allow for drawing a random sigma between lo and hi float values
-
-            if isinstance(blur_sigma, tuple):
-                blur_sigma = tuple(map(float, blur_sigma))
-                blur_sigma = random.uniform(*blur_sigma)
-
-            # allow for drawing a random kernel size between lo and hi int values
-
-            if isinstance(blur_kernel_size, tuple):
-                blur_kernel_size = tuple(map(int, blur_kernel_size))
-                kernel_size_lo, kernel_size_hi = blur_kernel_size
-                blur_kernel_size = random.randrange(kernel_size_lo, kernel_size_hi + 1)
-
-            cond_fmap = gaussian_blur2d(
-                cond_fmap, cast_tuple(blur_kernel_size, 2), cast_tuple(blur_sigma, 2)
+            cond_fmap = temporal_apply(
+                self.blur_image, cond_fmap, blur_sigma, blur_kernel_size
             )
 
         # resize to target image size
 
-        cond_fmap = resize_video_to(
-            cond_fmap, target_frame_size, clamp_range=self.input_image_range, nearest=True
+        cond_fmap = temporal_apply(
+            resize_image_to,
+            cond_fmap,
+            target_frame_size,
+            clamp_range=self.input_image_range,
+            nearest=True,
         )
 
         # noise conditioning, as done in Imagen
@@ -2114,7 +2123,7 @@ class VideoDecoder(nn.Module):
             else (None, None)
         )
         # TODO: Check if the original utility function can be used here.
-        video = resize_video_to(video, target_frame_size, nearest=True)
+        video = temporal_apply(resize_image_to, video, target_frame_size, nearest=True)
 
         if exists(random_crop_size):
             aug = K.RandomCrop((random_crop_size, random_crop_size), p=1.0)
