@@ -809,6 +809,8 @@ class UnetTemporalConv(Unet):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        self.learned_var = self.channels_out == self.channels * 2
+
         self.temporal_conv = nn.Conv3d(
             in_channels=self.channels_out,
             out_channels=self.channels_out,
@@ -816,7 +818,6 @@ class UnetTemporalConv(Unet):
             stride=1,
             padding="same",
         )
-        cprint(self.channels_out, "yellow")
 
     def forward(
         self,
@@ -854,10 +855,15 @@ class UnetTemporalConv(Unet):
         # ( b * t, c * 2, h, w )
 
         # FIXME: Getting rid of learned variance here.
-        x = x.chunk(2, dim=1)[0]
+        if not self.learned_var:
+            x = x.chunk(2, dim=1)[0]
 
-        x = x.view(b, t, c, h, w).permute(0, 2, 1, 3, 4)
-        # ( b, c, t, h, w )
+            x = x.view(b, t, c, h, w).permute(0, 2, 1, 3, 4)
+            # ( b, c, t, h, w )
+
+        else:
+            x = x.view(b, t, c * 2, h, w).permute(0, 2, 1, 3, 4)
+            # ( b, c * 2, t, h, w )
 
         x = self.temporal_conv(x)
 
