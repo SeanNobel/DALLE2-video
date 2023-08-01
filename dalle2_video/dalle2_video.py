@@ -1790,9 +1790,13 @@ class VideoDecoder(nn.Module):
 
         # normalize to [-1, 1]
 
+        maybe(cprint(lowres_cond_video.shape, "yellow"))
+
         if not is_latent_diffusion:
             x_start = self.normalize_video(x_start)
             lowres_cond_video = maybe(self.normalize_video)(lowres_cond_video)
+
+        maybe(cprint(lowres_cond_video.shape, "yellow"))
 
         # get x_t
 
@@ -2149,7 +2153,6 @@ class VideoDecoder(nn.Module):
                 lowres_cond_video = lowres_cond_video.view(
                     b, t, *lowres_cond_video.shape[1:]
                 )
-                cprint(lowres_cond_video.shape, "red")
 
         losses = self.p_losses(
             unet,
