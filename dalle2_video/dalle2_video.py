@@ -841,7 +841,6 @@ class UnetTemporalConv(Unet):
         video_embed = video_embed.view(b * t, -1)
 
         times = torch.repeat_interleave(times, repeats=t, dim=0)
-        cprint(times.shape, "yellow")
 
         x = super().forward(
             x,
@@ -851,6 +850,8 @@ class UnetTemporalConv(Unet):
             image_cond_drop_prob=video_cond_drop_prob,
             **kwargs,
         )
+
+        cprint(x.shape, "yellow")
 
         x = x.view(b, t, c, h, w).permute(0, 2, 1, 3, 4)
 
