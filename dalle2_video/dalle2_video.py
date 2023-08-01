@@ -1976,7 +1976,14 @@ class VideoDecoder(nn.Module):
             else (None, None)
         )
         # TODO: Check if the original utility function can be used here.
-        video = resize_image_to(video, target_frame_size, nearest=True)
+        video = torch.stack(
+            [
+                resize_image_to(video[:, _t], target_frame_size, nearest=True)
+                for _t in range(t)
+            ],
+            dim=1,
+        )
+        cprint(video.shape, "yellow")
 
         if exists(random_crop_size):
             aug = K.RandomCrop((random_crop_size, random_crop_size), p=1.0)
