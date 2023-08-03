@@ -357,12 +357,13 @@ class VideoDecoderTrainer(nn.Module):
                 if cond_video is not None:
                     cond_videos.append(cond_video)
 
-            total_loss.append(loss)
+                total_loss.append(loss)
+                print(loss)
 
             if self.training and not self.accum_grad:
                 self.accelerator.backward(loss)
 
-        total_loss = torch.mean(total_loss)
+        total_loss = torch.tensor(total_loss).mean()
 
         if self.training and self.accum_grad:
             self.accelerator.backward(total_loss)
