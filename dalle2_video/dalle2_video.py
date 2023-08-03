@@ -1,5 +1,7 @@
+import sys
 from typing import Any, Callable, Optional, Union, Tuple, List, Dict
 from termcolor import cprint
+import logging
 
 import torch
 import torch.nn as nn
@@ -9,6 +11,8 @@ from coca_pytorch import CoCa
 
 from dalle2_pytorch.dalle2_pytorch import *
 from dalle2_pytorch.vqgan_vae import NullVQGanVAE, VQGanVAE
+
+logger = logging.getLogger("dalle2_video")
 
 
 def temporal_apply(
@@ -2065,16 +2069,14 @@ class VideoDecoder(nn.Module):
         unet_number=None,
         return_lowres_cond_video=False,  # whether to return the low resolution conditioning images, for debugging upsampler purposes
     ):
-        """_summary_
-
+        """Given a unet and video, runs denoising process once.
         Args:
             video: ( batch_size, frames, channels, height, width )
             video_embed (_type_, optional): _description_. Defaults to None.
             text (_type_, optional): _description_. Defaults to None.
             text_encodings (_type_, optional): _description_. Defaults to None.
             unet_number (_type_, optional): _description_. Defaults to None.
-            return_lowres_cond_video (_type_, optional): _description_. Defaults to False#whethertoreturnthelowresolutionconditioningimages.
-
+            return_lowres_cond_video (_type_, optional): _description_. Defaults to False
         Returns:
             _type_: _description_
         """
@@ -2155,6 +2157,9 @@ class VideoDecoder(nn.Module):
                 lowres_cond_video = lowres_cond_video.view(
                     b, t, *lowres_cond_video.shape[1:]
                 )
+
+        logger.debug(f"video for Unet {unet_number}: {video.shape}")
+        logger.debug(f"lowres_cond_video for Unet {unet_number}: {lowres_cond_video.shape if exists(lowres_cond_video) else None}")  # fmt: skip
 
         losses = self.p_losses(
             unet,
