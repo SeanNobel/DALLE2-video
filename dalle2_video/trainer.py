@@ -7,6 +7,7 @@ class VideoDecoderTrainer(nn.Module):
         self,
         decoder,
         accum_grad: bool = False,
+        sub_batch_size: int = 1,
         accelerator=None,
         dataloaders=None,
         use_ema=True,
@@ -25,6 +26,7 @@ class VideoDecoderTrainer(nn.Module):
         ema_kwargs, kwargs = groupby_prefix_and_trim("ema_", kwargs)
 
         self.accum_grad = accum_grad
+        self.sub_batch_size = sub_batch_size
 
         self.accelerator = default(accelerator, Accelerator)
 
@@ -327,7 +329,6 @@ class VideoDecoderTrainer(nn.Module):
         self,
         *args,
         unet_number=None,
-        max_batch_size=None,
         return_lowres_cond_video=False,
         **kwargs,
     ):
@@ -336,7 +337,7 @@ class VideoDecoderTrainer(nn.Module):
         total_loss = []
         cond_videos = []
         for chunk_size_frac, (chunked_args, chunked_kwargs) in split_args_and_kwargs(
-            *args, split_size=max_batch_size, **kwargs
+            *args, split_size=self.sub_batch_size, **kwargs
         ):
             with self.accelerator.autocast():
                 loss_obj = self.decoder(
@@ -358,12 +359,11 @@ class VideoDecoderTrainer(nn.Module):
                     cond_videos.append(cond_video)
 
                 total_loss.append(loss)
-                print(loss)
 
             if self.training and not self.accum_grad:
                 self.accelerator.backward(loss)
 
-        total_loss = torch.tensor(total_loss).mean()
+        total_loss = torch.stack(total_loss).mean()
 
         if self.training and self.accum_grad:
             self.accelerator.backward(total_loss)
