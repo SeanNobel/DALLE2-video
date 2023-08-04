@@ -1,5 +1,14 @@
 # DALLE2-video
 
+## TODOs
+
+- [ ] `Unet3D`
+  - [ ] `Block3D`
+  - [ ] `ResnetBlock3D`
+  - [ ] `CrossEmbedLayer3D`
+- [ ] Temporal super-resolution model (a mode in Unet3D?)
+- [ ] Learning variance for video diffusion significantly unstabilizes training. How to compensate or just stop learning variance?
+
 ## References
 
 - [DALLE2-pytorch](https://github.com/lucidrains/DALLE2-pytorch)
