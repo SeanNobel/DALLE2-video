@@ -2180,3 +2180,61 @@ class VideoDecoder(nn.Module):
             return losses
 
         return losses, lowres_cond_video
+
+
+class DALLE2Video(nn.Module):
+    def __init__(
+        self, *, prior, decoder, temporal_emb: bool = False, prior_num_samples=2
+    ) -> None:
+        super().__init__()
+        assert isinstance(prior, DiffusionPrior)
+        assert isinstance(decoder, VideoDecoder)
+        self.prior = prior
+        self.decoder = decoder
+
+        self.temporal_emb = temporal_emb
+
+        self.prior_num_samples = prior_num_samples
+        self.decoder_need_text_cond = self.decoder.condition_on_text_encodings
+
+    @torch.no_grad()
+    @eval_decorator
+    def forward(
+        self,
+        text: torch.Tensor,
+        cond_scale: float = 1.0,
+        prior_cond_scale: float = 1.0,
+    ):
+        # device = module_device(self)
+        # one_text = isinstance(text, str) or (not is_list_str(text) and text.shape[0] == 1)
+
+        # if isinstance(text, str) or is_list_str(text):
+        #     text = [text] if not isinstance(text, (list, tuple)) else text
+        #     text = tokenizer.tokenize(text).to(device)
+
+        b, d, t = text.shape
+
+        if self.temporal_emb:
+            text = text.permute(0, 2, 1).reshape(-1, text.shape[1])
+
+        video_embed = self.prior.sample(
+            text,
+            num_samples_per_batch=self.prior_num_samples,
+            cond_scale=prior_cond_scale,
+        )
+        print(video_embed.shape)
+
+        if self.temporal_emb:
+            video_embed.reshape(b, t, d).permute(0, 2, 1)
+
+        text_cond = text if self.decoder_need_text_cond else None
+        videos = self.decoder.sample(
+            video_embed=video_embed, text=text_cond, cond_scale=cond_scale
+        )
+
+        print(videos.shape)
+
+        # if one_text:
+        #     return first(images)
+
+        return videos
