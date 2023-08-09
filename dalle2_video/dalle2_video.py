@@ -844,13 +844,25 @@ class UnetTemporalConv(Unet):
             padding="same",
         )
 
+    def forward_with_cond_scale(self, *args, cond_scale=1.0, **kwargs):
+        logits = self.forward(*args, **kwargs)
+
+        if cond_scale == 1:
+            return logits
+
+        null_logits = self.forward(
+            *args, text_cond_drop_prob=1.0, video_cond_drop_prob=1.0, **kwargs
+        )
+
+        return null_logits + (logits - null_logits) * cond_scale
+
     def forward(
         self,
         x: torch.Tensor,
         times: torch.Tensor,
         video_embed: torch.Tensor,
         lowres_cond_video: Optional[torch.Tensor],
-        video_cond_drop_prob: float,
+        video_cond_drop_prob: float = 0.0,
         **kwargs,
     ):
         """_summary_
@@ -865,7 +877,7 @@ class UnetTemporalConv(Unet):
         b, t, c, _, _ = x.shape
 
         x = x.view(b * t, *x.shape[2:])
-        video_embed = video_embed.view(b * t, -1)
+        video_embed = video_embed.contiguous().view(b * t, -1)
 
         if exists(lowres_cond_video):
             lowres_cond_video = lowres_cond_video.view(
@@ -910,13 +922,13 @@ class LowresVideoConditioner(nn.Module):
         blur_sigma=0.6,
         blur_kernel_size=3,
         use_noise=False,
-        input_image_range=None,
+        input_video_range=None,
         normalize_video_fn=identity,
         unnormalize_video_fn=identity,
     ):
         super().__init__()
         self.downsample_first = downsample_first
-        self.input_image_range = input_image_range
+        self.input_video_range = input_video_range
 
         self.use_blur = use_blur
         self.blur_prob = blur_prob
@@ -932,7 +944,7 @@ class LowresVideoConditioner(nn.Module):
             else None
         )
 
-    def noise_image(self, cond_fmap, noise_levels=None):
+    def noise_video(self, cond_fmap, noise_levels=None):
         assert exists(self.noise_scheduler)
 
         batch = cond_fmap.shape[0]
@@ -950,6 +962,7 @@ class LowresVideoConditioner(nn.Module):
 
     @staticmethod
     def blur_image(cond_fmap: torch.Tensor, blur_sigma, blur_kernel_size):
+        # NOTE: Currently this method is applied to each frame independently.
         # when training, blur the low resolution conditional image
         # allow for drawing a random sigma between lo and hi float values
 
@@ -987,7 +1000,7 @@ class LowresVideoConditioner(nn.Module):
                 resize_image_to,
                 cond_fmap,
                 downsample_frame_size,
-                clamp_range=self.input_image_range,
+                clamp_range=self.input_video_range,
                 nearest=True,
             )
 
@@ -1008,7 +1021,7 @@ class LowresVideoConditioner(nn.Module):
             resize_image_to,
             cond_fmap,
             target_frame_size,
-            clamp_range=self.input_image_range,
+            clamp_range=self.input_video_range,
             nearest=True,
         )
 
@@ -1018,7 +1031,7 @@ class LowresVideoConditioner(nn.Module):
         random_noise_levels = None
 
         if self.use_noise:
-            cond_fmap, random_noise_levels = self.noise_image(cond_fmap)
+            cond_fmap, random_noise_levels = self.noise_video(cond_fmap)
 
         # return conditioning feature map, as well as the augmentation noise levels
 
@@ -1287,7 +1300,7 @@ class VideoDecoder(nn.Module):
 
         # input image range
 
-        self.input_image_range = (-1.0 if not auto_normalize_video else 0.0, 1.0)
+        self.input_video_range = (-1.0 if not auto_normalize_video else 0.0, 1.0)
 
         # cascading ddpm related stuff
 
@@ -1310,7 +1323,7 @@ class VideoDecoder(nn.Module):
                 blur_prob=blur_prob,
                 blur_sigma=blur_sigma,
                 blur_kernel_size=blur_kernel_size,
-                input_image_range=self.input_image_range,
+                input_video_range=self.input_video_range,
                 normalize_video_fn=self.normalize_video,
                 unnormalize_video_fn=self.unnormalize_video,
             )
@@ -1415,7 +1428,7 @@ class VideoDecoder(nn.Module):
         video_embed,
         noise_scheduler,
         text_encodings=None,
-        lowres_cond_video=None,
+        lowres_cond_vid=None,
         self_cond=None,
         clip_denoised=True,
         predict_x_start=False,
@@ -1432,10 +1445,10 @@ class VideoDecoder(nn.Module):
             lambda: unet.forward_with_cond_scale(
                 x,
                 t,
-                video=video_embed,
+                video_embed=video_embed,
                 text_encodings=text_encodings,
                 cond_scale=cond_scale,
-                lowres_cond_video=lowres_cond_video,
+                lowres_cond_video=lowres_cond_vid,
                 self_cond=self_cond,
                 lowres_noise_level=lowres_noise_level,
             ),
@@ -1482,11 +1495,11 @@ class VideoDecoder(nn.Module):
         unet,
         x,
         t,
-        image_embed,
+        video_embed,
         noise_scheduler,
         text_encodings=None,
         cond_scale=1.0,
-        lowres_cond_img=None,
+        lowres_cond_vid=None,
         self_cond=None,
         predict_x_start=False,
         predict_v=False,
@@ -1495,14 +1508,15 @@ class VideoDecoder(nn.Module):
         lowres_noise_level=None,
     ):
         b, *_, device = *x.shape, x.device
+
         model_mean, _, model_log_variance, x_start = self.p_mean_variance(
             unet,
             x=x,
             t=t,
-            image_embed=image_embed,
+            video_embed=video_embed,
             text_encodings=text_encodings,
             cond_scale=cond_scale,
-            lowres_cond_img=lowres_cond_img,
+            lowres_cond_vid=lowres_cond_vid,
             self_cond=self_cond,
             clip_denoised=clip_denoised,
             predict_x_start=predict_x_start,
@@ -1511,10 +1525,14 @@ class VideoDecoder(nn.Module):
             learned_variance=learned_variance,
             lowres_noise_level=lowres_noise_level,
         )
+
         noise = torch.randn_like(x)
+
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
+
         pred = model_mean + nonzero_mask * (0.5 * model_log_variance).exp() * noise
+
         return pred, x_start
 
     @torch.no_grad()
@@ -1522,30 +1540,30 @@ class VideoDecoder(nn.Module):
         self,
         unet,
         shape,
-        image_embed,
+        video_embed,
         noise_scheduler,
         predict_x_start=False,
         predict_v=False,
         learned_variance=False,
         clip_denoised=True,
-        lowres_cond_img=None,
+        lowres_cond_vid=None,
         text_encodings=None,
         cond_scale=1,
         is_latent_diffusion=False,
         lowres_noise_level=None,
-        inpaint_image=None,
-        inpaint_mask=None,
-        inpaint_resample_times=5,
+        # inpaint_image=None,
+        # inpaint_mask=None,
+        # inpaint_resample_times=5,
     ):
         device = self.device
 
         b = shape[0]
-        img = torch.randn(shape, device=device)
+        vid = torch.randn(shape, device=device)
 
         x_start = None  # for self-conditioning
 
-        is_inpaint = exists(inpaint_image)
-        resample_times = inpaint_resample_times if is_inpaint else 1
+        # is_inpaint = exists(inpaint_image)
+        resample_times = 1  # inpaint_resample_times if is_inpaint else 1
 
         # NOTE: Inpainting is not supported for video.
         # if is_inpaint:
@@ -1556,7 +1574,7 @@ class VideoDecoder(nn.Module):
         #     inpaint_mask = inpaint_mask.bool()
 
         if not is_latent_diffusion:
-            lowres_cond_img = maybe(self.normalize_video)(lowres_cond_img)
+            lowres_cond_vid = maybe(self.normalize_video)(lowres_cond_vid)
 
         for time in tqdm(
             reversed(range(0, noise_scheduler.num_timesteps)),
@@ -1570,25 +1588,25 @@ class VideoDecoder(nn.Module):
 
                 times = torch.full((b,), time, device=device, dtype=torch.long)
 
-                if is_inpaint:
-                    # following the repaint paper
-                    # https://arxiv.org/abs/2201.09865
-                    noised_inpaint_image = noise_scheduler.q_sample(
-                        inpaint_image, t=times
-                    )
-                    img = (img * ~inpaint_mask) + (noised_inpaint_image * inpaint_mask)
+                # if is_inpaint:
+                #     # following the repaint paper
+                #     # https://arxiv.org/abs/2201.09865
+                #     noised_inpaint_image = noise_scheduler.q_sample(
+                #         inpaint_image, t=times
+                #     )
+                #     img = (img * ~inpaint_mask) + (noised_inpaint_image * inpaint_mask)
 
                 self_cond = x_start if unet.self_cond else None
 
-                img, x_start = self.p_sample(
+                vid, x_start = self.p_sample(
                     unet,
-                    img,
+                    vid,
                     times,
-                    image_embed=image_embed,
+                    video_embed=video_embed,
                     text_encodings=text_encodings,
                     cond_scale=cond_scale,
                     self_cond=self_cond,
-                    lowres_cond_img=lowres_cond_img,
+                    lowres_cond_vid=lowres_cond_vid,
                     lowres_noise_level=lowres_noise_level,
                     predict_x_start=predict_x_start,
                     predict_v=predict_v,
@@ -1597,15 +1615,16 @@ class VideoDecoder(nn.Module):
                     clip_denoised=clip_denoised,
                 )
 
-                if is_inpaint and not (is_last_timestep or is_last_resample_step):
-                    # in repaint, you renoise and resample up to 10 times every step
-                    img = noise_scheduler.q_sample_from_to(img, times - 1, times)
+                # if is_inpaint and not (is_last_timestep or is_last_resample_step):
+                #     # in repaint, you renoise and resample up to 10 times every step
+                #     img = noise_scheduler.q_sample_from_to(img, times - 1, times)
 
-        if is_inpaint:
-            img = (img * ~inpaint_mask) + (inpaint_image * inpaint_mask)
+        # if is_inpaint:
+        #     img = (img * ~inpaint_mask) + (inpaint_image * inpaint_mask)
 
-        unnormalize_img = self.unnormalize_video(img)
-        return unnormalize_img
+        unnormalize_vid = self.unnormalize_video(vid)
+
+        return unnormalize_vid
 
     @torch.no_grad()
     def p_sample_loop_ddim(
@@ -1907,8 +1926,8 @@ class VideoDecoder(nn.Module):
     @eval_decorator
     def sample(
         self,
-        image=None,
-        image_embed=None,
+        video=None,
+        video_embed=None,
         text=None,
         text_encodings=None,
         batch_size=1,
@@ -1916,79 +1935,53 @@ class VideoDecoder(nn.Module):
         start_at_unet_number=1,
         stop_at_unet_number=None,
         distributed=False,
-        inpaint_image=None,
-        inpaint_mask=None,
-        inpaint_resample_times=5,
+        # inpaint_image=None,
+        # inpaint_mask=None,
+        # inpaint_resample_times=5,
         one_unet_in_gpu_at_time=True,
     ):
-        assert self.unconditional or exists(
-            image_embed
-        ), "image embed must be present on sampling from decoder unless if trained unconditionally"
+        assert self.unconditional or exists(video_embed), "image embed must be present on sampling from decoder unless if trained unconditionally"  # fmt: skip
 
         if not self.unconditional:
-            batch_size = image_embed.shape[0]
+            batch_size = video_embed.shape[0]
 
         if exists(text) and not exists(text_encodings) and not self.unconditional:
             assert exists(self.clip)
             _, text_encodings = self.clip.embed_text(text)
 
-        assert not (
-            self.condition_on_text_encodings and not exists(text_encodings)
-        ), "text or text encodings must be passed into decoder if specified"
-        assert not (
-            not self.condition_on_text_encodings and exists(text_encodings)
-        ), "decoder specified not to be conditioned on text, yet it is presented"
+        assert not (self.condition_on_text_encodings and not exists(text_encodings)), "text or text encodings must be passed into decoder if specified"  # fmt: skip
+        assert not (not self.condition_on_text_encodings and exists(text_encodings)), "decoder specified not to be conditioned on text, yet it is presented"  # fmt: skip
 
-        assert not (
-            exists(inpaint_image) ^ exists(inpaint_mask)
-        ), "inpaint_image and inpaint_mask (boolean mask of [batch, height, width]) must be both given for inpainting"
+        # assert not (exists(inpaint_image) ^ exists(inpaint_mask)), "inpaint_image and inpaint_mask (boolean mask of [batch, height, width]) must be both given for inpainting"
 
-        img = None
+        vid = None
         if start_at_unet_number > 1:
             # Then we are not generating the first image and one must have been passed in
-            assert exists(image), "image must be passed in if starting at unet number > 1"
-            assert (
-                image.shape[0] == batch_size
-            ), "image must have batch size of {} if starting at unet number > 1".format(
-                batch_size
-            )
+            assert exists(video), "image must be passed in if starting at unet number > 1"
+            assert (video.shape[0] == batch_size), "image must have batch size of {} if starting at unet number > 1".format(batch_size)  # fmt: skip
             prev_unet_output_size = self.frame_sizes[start_at_unet_number - 2]
-            img = resize_image_to(image, prev_unet_output_size, nearest=True)
+            vid = temporal_apply(
+                resize_image_to, video, prev_unet_output_size, nearest=True
+            )
 
         is_cuda = next(self.parameters()).is_cuda
 
         num_unets = self.num_unets
         cond_scale = cast_tuple(cond_scale, num_unets)
 
+        # fmt: off
         for (
-            unet_number,
-            unet,
-            vae,
-            channel,
-            image_size,
-            predict_x_start,
-            predict_v,
-            learned_variance,
-            noise_scheduler,
-            lowres_cond,
-            sample_timesteps,
-            unet_cond_scale,
+            unet_number, unet, vae, channel,
+            frame_size, frame_number, predict_x_start, predict_v,
+            learned_variance, noise_scheduler, lowres_cond, sample_timesteps, unet_cond_scale,
         ) in tqdm(
             zip(
-                range(1, num_unets + 1),
-                self.unets,
-                self.vaes,
-                self.sample_channels,
-                self.frame_sizes,
-                self.predict_x_start,
-                self.predict_v,
-                self.learned_variance,
-                self.noise_schedulers,
-                self.lowres_conds,
-                self.sample_timesteps,
-                cond_scale,
+                range(1, num_unets + 1), self.unets, self.vaes, self.sample_channels,
+                self.frame_sizes, self.frame_numbers, self.predict_x_start, self.predict_v,
+                self.learned_variance, self.noise_schedulers, self.lowres_conds, self.sample_timesteps, cond_scale,
             )
         ):
+        # fmt: on
             if unet_number < start_at_unet_number:
                 continue  # It's the easiest way to do it
 
@@ -2001,14 +1994,15 @@ class VideoDecoder(nn.Module):
             with context:
                 # prepare low resolution conditioning for upsamplers
 
-                lowres_cond_img = lowres_noise_level = None
-                shape = (batch_size, channel, image_size, image_size)
-
+                lowres_cond_vid = lowres_noise_level = None
+                shape = (batch_size, frame_number, channel, frame_size, frame_size)
+                
                 if unet.lowres_cond:
-                    lowres_cond_img = resize_image_to(
-                        img,
-                        target_image_size=image_size,
-                        clamp_range=self.input_image_range,
+                    lowres_cond_vid = temporal_apply(
+                        resize_image_to,
+                        vid,
+                        frame_size,
+                        clamp_range=self.input_video_range,
                         nearest=True,
                     )
 
@@ -2019,46 +2013,47 @@ class VideoDecoder(nn.Module):
                             dtype=torch.long,
                             device=self.device,
                         )
-                        lowres_cond_img, _ = lowres_cond.noise_image(
-                            lowres_cond_img, lowres_noise_level
+                        lowres_cond_vid, _ = lowres_cond.noise_video(
+                            lowres_cond_vid, lowres_noise_level
                         )
 
                 # latent diffusion
 
                 is_latent_diffusion = isinstance(vae, VQGanVAE)
-                image_size = vae.get_encoded_fmap_size(image_size)
-                shape = (batch_size, vae.encoded_dim, image_size, image_size)
+                frame_size = vae.get_encoded_fmap_size(frame_size)
+                shape = (batch_size, frame_number, vae.encoded_dim, frame_size, frame_size)
 
-                lowres_cond_img = maybe(vae.encode)(lowres_cond_img)
+                lowres_cond_vid = maybe(vae.encode)(lowres_cond_vid)
 
                 # denoising loop for image
 
-                img = self.p_sample_loop(
+                vid = self.p_sample_loop(
                     unet,
                     shape,
-                    image_embed=image_embed,
+                    video_embed=video_embed,
                     text_encodings=text_encodings,
                     cond_scale=unet_cond_scale,
                     predict_x_start=predict_x_start,
                     predict_v=predict_v,
                     learned_variance=learned_variance,
                     clip_denoised=not is_latent_diffusion,
-                    lowres_cond_img=lowres_cond_img,
+                    lowres_cond_vid=lowres_cond_vid,
                     lowres_noise_level=lowres_noise_level,
                     is_latent_diffusion=is_latent_diffusion,
                     noise_scheduler=noise_scheduler,
                     timesteps=sample_timesteps,
-                    inpaint_image=inpaint_image,
-                    inpaint_mask=inpaint_mask,
-                    inpaint_resample_times=inpaint_resample_times,
+                    # inpaint_image=inpaint_image,
+                    # inpaint_mask=inpaint_mask,
+                    # inpaint_resample_times=inpaint_resample_times,
                 )
 
-                img = vae.decode(img)
+                vid = vae.decode(vid.view(-1, *vid.shape[2:]))
+                vid = vid.view(batch_size, frame_number, *vid.shape[1:])
 
             if exists(stop_at_unet_number) and stop_at_unet_number == unet_number:
                 break
 
-        return img
+        return vid
 
     def forward(
         self,
@@ -2201,7 +2196,8 @@ class DALLE2Video(nn.Module):
     @eval_decorator
     def forward(
         self,
-        text: torch.Tensor,
+        text: Optional[torch.Tensor] = None,
+        text_embed: Optional[torch.Tensor] = None,
         cond_scale: float = 1.0,
         prior_cond_scale: float = 1.0,
     ):
@@ -2212,27 +2208,29 @@ class DALLE2Video(nn.Module):
         #     text = [text] if not isinstance(text, (list, tuple)) else text
         #     text = tokenizer.tokenize(text).to(device)
 
-        b, d, t = text.shape
+        b, d, t = text_embed.shape
 
         if self.temporal_emb:
-            text = text.permute(0, 2, 1).reshape(-1, text.shape[1])
+            text_embed = text_embed.permute(0, 2, 1).reshape(-1, d)
 
         video_embed = self.prior.sample(
-            text,
+            text_embed,
             num_samples_per_batch=self.prior_num_samples,
             cond_scale=prior_cond_scale,
         )
-        print(video_embed.shape)
 
         if self.temporal_emb:
-            video_embed.reshape(b, t, d).permute(0, 2, 1)
+            video_embed = video_embed.reshape(b, t, d).permute(0, 2, 1)
 
         text_cond = text if self.decoder_need_text_cond else None
-        videos = self.decoder.sample(
-            video_embed=video_embed, text=text_cond, cond_scale=cond_scale
-        )
+        text_embed = text_embed if self.decoder_need_text_cond else None
 
-        print(videos.shape)
+        videos = self.decoder.sample(
+            video_embed=video_embed,
+            text=text_cond,
+            text_encodings=text_embed,
+            cond_scale=cond_scale,
+        )
 
         # if one_text:
         #     return first(images)
