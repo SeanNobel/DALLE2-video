@@ -9,10 +9,72 @@ import torch.nn as nn
 from x_clip import CLIP
 from coca_pytorch import CoCa
 
-from dalle2_pytorch.dalle2_pytorch import *
+from dalle2_video._dalle2_pytorch import *
 from dalle2_pytorch.vqgan_vae import NullVQGanVAE, VQGanVAE
 
 logger = logging.getLogger("dalle2_video")
+
+
+def Downsample3D(dim, dim_out=None):
+    # https://arxiv.org/abs/2208.03641 shows this is the most optimal way to downsample
+    # named SP-conv in the paper, but basically a pixel unshuffle
+    dim_out = default(dim_out, dim)
+    return nn.Sequential(
+        Rearrange("b c t (h s1) (w s2) -> b (c s1 s2) t h w", s1=2, s2=2),
+        nn.Conv3d(dim * 4, dim_out, 1),
+    )
+
+
+def NearestUpsample3D(dim, dim_out=None):
+    dim_out = default(dim_out, dim)
+
+    return nn.Sequential(
+        nn.Upsample(scale_factor=(1, 2, 2), mode="nearest"),
+        nn.Conv3d(dim, dim_out, kernel_size=(1, 3, 3), padding=(0, 1, 1)),
+    )
+
+
+class PixelShuffleUpsample3D(nn.Module):
+    """
+    code shared by @MalumaDev at DALLE2-pytorch for addressing checkboard artifacts
+    https://arxiv.org/ftp/arxiv/papers/1707/1707.02937.pdf
+    """
+
+    def __init__(self, dim, dim_out=None):
+        super().__init__()
+        dim_out = default(dim_out, dim)
+
+        self.conv = nn.Conv3d(dim, dim_out * 4, 1)
+        self.act = nn.SiLU()
+
+        self.pixel_shuffle = nn.PixelShuffle(upscale_factor=2)
+
+        self.init_conv_(self.conv)
+
+    def init_conv_(self, conv):
+        o, i, t, h, w = conv.weight.shape
+        conv_weight = torch.empty(o // 4, i, t, h, w)
+        nn.init.kaiming_uniform_(conv_weight)
+        conv_weight = repeat(conv_weight, "o ... -> (o 4) ...")
+
+        conv.weight.data.copy_(conv_weight)
+        nn.init.zeros_(conv.bias.data)
+
+    def forward(self, x: torch.Tensor):
+        """_summary_
+        Args:
+            x ( b, c, t, h, w ): _description_
+        Returns:
+            _type_: _description_
+        """
+        x = self.act(self.conv(x))
+
+        t = x.shape[2]
+        x = rearrange(x, "b c t h w -> (b t) c h w")
+
+        x = self.pixel_shuffle(x)
+
+        return rearrange(x, "(b t) c h w -> b c t h w", t=t)
 
 
 def temporal_apply(
@@ -23,29 +85,41 @@ def temporal_apply(
 ):
     """Apply any function sequentially to each frame of a video.
     Args:
-        video ( b, t, * ): _description_
-        target_frame_size (int): _description_
-        clamp_range (Optional[float], optional): _description_. Defaults to None.
-        nearest (bool, optional): _description_. Defaults to False.
+        x ( b, c, t, h, w ): _description_
     Returns:
         _type_: _description_
     """
     return torch.stack(
-        [fn(x[:, _t], *args, **kwargs) for _t in range(x.shape[1])],
-        dim=1,
+        [fn(x[:, :, _t], *args, **kwargs) for _t in range(x.shape[2])],
+        dim=2,
     )
 
 
 class Block3D(nn.Module):
     def __init__(self, dim, dim_out, groups=8, weight_standardization=False):
         super().__init__()
+
+        # TODO: Implement WeightStandardizedConv3d
         # conv_klass = nn.Conv2d if not weight_standardization else WeightStandardizedConv2d
 
-        self.project = nn.Conv3d(dim, dim_out, kernel_size=3, padding=1)
+        # NOTE: "we change each 3x3 convolution into a 1x3x3 convolution" in https://arxiv.org/abs/2204.03458
+        self.project = nn.Conv3d(dim, dim_out, kernel_size=(1, 3, 3), padding=(0, 1, 1))
+
         self.norm = nn.GroupNorm(groups, dim_out)
         self.act = nn.SiLU()
 
-    def forward(self, x, scale_shift=None):
+    def forward(
+        self,
+        x: torch.Tensor,
+        scale_shift: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ):
+        """_summary_
+        Args:
+            x ( b, c, t, h, w ): _description_
+            scale_shift (( b, dim_out, 1, 1, 1 ), ( b, dim_out, 1, 1, 1 )): _description_
+        Returns:
+            _type_: _description_
+        """
         x = self.project(x)
         x = self.norm(x)
 
@@ -54,6 +128,7 @@ class Block3D(nn.Module):
             x = x * (scale + 1) + shift
 
         x = self.act(x)
+
         return x
 
 
@@ -85,20 +160,31 @@ class ResnetBlock3D(nn.Module):
                 dim=dim_out, context_dim=cond_dim, cosine_sim=cosine_sim_cross_attn
             )
 
-        self.block1 = Block(
+        self.block1 = Block3D(
             dim, dim_out, groups=groups, weight_standardization=weight_standardization
         )
-        self.block2 = Block(
+        self.block2 = Block3D(
             dim_out, dim_out, groups=groups, weight_standardization=weight_standardization
         )
-        self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
+        self.res_conv = nn.Conv3d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
-    def forward(self, x, time_emb=None, cond=None):
+    def forward(
+        self, x: torch.Tensor, time_emb: Optional[torch.Tensor] = None, cond=None
+    ):
+        """_summary_
+        Args:
+            x ( b, c, t, h, w ): _description_
+            time_emb ( b, time_cond_dim ): _description_. Defaults to None.
+            cond (_type_, optional): _description_. Defaults to None.
+        Returns:
+            _type_: _description_
+        """
         scale_shift = None
         if exists(self.time_mlp) and exists(time_emb):
-            time_emb = self.time_mlp(time_emb)
-            time_emb = rearrange(time_emb, "b c -> b c 1 1")
+            time_emb = self.time_mlp(time_emb)  # ( b, dim_out * 2 )
+            time_emb = rearrange(time_emb, "b c -> b c 1 1 1")
             scale_shift = time_emb.chunk(2, dim=1)
+            # ( b, dim_out, 1, 1, 1 ), ( b, dim_out, 1, 1, 1 )
 
         h = self.block1(x, scale_shift=scale_shift)
 
@@ -114,6 +200,7 @@ class ResnetBlock3D(nn.Module):
             h = rearrange(h, "b ... c -> b c ...")
 
         h = self.block2(h)
+
         return h + self.res_conv(x)
 
 
@@ -123,7 +210,8 @@ class CrossEmbedLayer3D(nn.Module):
         assert all([*map(lambda t: (t % 2) == (stride % 2), kernel_sizes)])
         dim_out = default(dim_out, dim_in)
 
-        kernel_sizes = sorted(kernel_sizes)
+        # FIXME: Doing ksize=1 conv for time dimension.
+        kernel_sizes = [(1, ksize, ksize) for ksize in sorted(kernel_sizes)]
         num_scales = len(kernel_sizes)
 
         # calculate the dimension at each scale
@@ -131,20 +219,28 @@ class CrossEmbedLayer3D(nn.Module):
         dim_scales = [*dim_scales, dim_out - sum(dim_scales)]
 
         self.convs = nn.ModuleList([])
-        for kernel, dim_scale in zip(kernel_sizes, dim_scales):
+        for ksize, dim_scale in zip(kernel_sizes, dim_scales):
             self.convs.append(
-                nn.Conv2d(
+                nn.Conv3d(
                     dim_in,
                     dim_scale,
-                    kernel,
-                    stride=stride,
-                    padding=(kernel - stride) // 2,
+                    ksize,
+                    stride=(1, stride, stride),
+                    padding=(0, (ksize[1] - stride) // 2, (ksize[2] - stride) // 2),
                 )
             )
 
     def forward(self, x):
+        """_summary_
+        Args:
+            x ( b, c=3, t, h, w ): _description_
+        Returns:
+            x: ( b, c', t, h, w ): Initial convoluted video.
+        """
         fmaps = tuple(map(lambda conv: conv(x), self.convs))
-        return torch.cat(fmaps, dim=1)
+        x = torch.cat(fmaps, dim=1)
+
+        return x
 
 
 class Unet3D(nn.Module):
@@ -152,7 +248,7 @@ class Unet3D(nn.Module):
         self,
         dim,
         *,
-        image_embed_dim=None,
+        video_embed_dim=None,
         text_embed_dim=None,
         cond_dim=None,
         num_image_tokens=4,
@@ -173,21 +269,21 @@ class Unet3D(nn.Module):
         attend_at_middle=True,  # whether to have a layer of attention at the bottleneck (can turn off for higher resolution in cascading DDPM, before bringing in efficient attention)
         cond_on_text_encodings=False,
         max_text_len=256,
-        cond_on_image_embeds=False,
-        add_image_embeds_to_time=True,  # alerted by @mhh0318 to a phrase in the paper - "Specifically, we modify the architecture described in Nichol et al. (2021) by projecting and adding CLIP embeddings to the existing timestep embedding"
+        cond_on_video_embeds=False,
+        add_video_embeds_to_time=True,  # alerted by @mhh0318 to a phrase in the paper - "Specifically, we modify the architecture described in Nichol et al. (2021) by projecting and adding CLIP embeddings to the existing timestep embedding"
         init_dim=None,
-        init_conv_kernel_size=(1, 7, 7),  # NOTE: space-only 3D convolution.
+        init_conv_ksize=7,  # (1, 7, 7),  # NOTE: space-only 3D convolution.
         resnet_groups=8,
         resnet_weight_standardization=False,
         num_resnet_blocks=2,
-        init_cross_embed=False,  # True, FIXME: implement CrossEmbedLayer3D later.
+        init_cross_embed=True,  # False, # FIXME: implement CrossEmbedLayer3D later.
         init_cross_embed_kernel_sizes=(3, 7, 15),
         cross_embed_downsample=False,
         cross_embed_downsample_kernel_sizes=(2, 4),
         memory_efficient=False,
         scale_skip_connection=False,
         pixel_shuffle_upsample=True,
-        final_conv_kernel_size=1,
+        final_conv_ksize=1,
         combine_upsample_fmaps=False,  # whether to combine the outputs of all upsample blocks, as in unet squared paper
         checkpoint_during_training=False,
         **kwargs,
@@ -229,15 +325,17 @@ class Unet3D(nn.Module):
             )
             if init_cross_embed
             else nn.Conv3d(
-                init_channels,
-                init_dim,
-                init_conv_kernel_size,
-                padding="same",  # init_conv_kernel_size // 2,
+                in_channels=init_channels,
+                out_channels=init_dim,
+                kernel_size=(1, init_conv_ksize, init_conv_ksize),
+                padding=(0, init_conv_ksize // 2, init_conv_ksize // 2),
             )
         )
 
         dims = [init_dim, *map(lambda m: dim * m, dim_mults)]
+        # e.g. [128, 128, 256, 512, 1024]
         in_out = list(zip(dims[:-1], dims[1:]))
+        # e.g. [(128, 128), (128, 256), (256, 512), (512, 1024)]
 
         num_stages = len(in_out)
 
@@ -257,18 +355,18 @@ class Unet3D(nn.Module):
 
         self.to_time_cond = nn.Sequential(nn.Linear(time_cond_dim, time_cond_dim))
 
-        self.image_to_tokens = (
+        self.video_to_tokens = (
             nn.Sequential(
-                nn.Linear(image_embed_dim, cond_dim * num_image_tokens),
+                nn.Linear(video_embed_dim, cond_dim * num_image_tokens),
                 Rearrange("b (n d) -> b n d", n=num_image_tokens),
             )
-            if cond_on_image_embeds and image_embed_dim != cond_dim
+            if cond_on_video_embeds and video_embed_dim != cond_dim
             else nn.Identity()
         )
 
-        self.to_image_hiddens = (
-            nn.Sequential(nn.Linear(image_embed_dim, time_cond_dim), nn.GELU())
-            if cond_on_image_embeds and add_image_embeds_to_time
+        self.to_video_hiddens = (
+            nn.Sequential(nn.Linear(video_embed_dim, time_cond_dim), nn.GELU())
+            if cond_on_video_embeds and add_video_embeds_to_time
             else None
         )
 
@@ -306,12 +404,12 @@ class Unet3D(nn.Module):
         # so one can have the latter unets in the cascading DDPMs only focus on super-resoluting
 
         self.cond_on_text_encodings = cond_on_text_encodings
-        self.cond_on_image_embeds = cond_on_image_embeds
+        self.cond_on_video_embeds = cond_on_video_embeds
 
         # for classifier free guidance
 
-        self.null_image_embed = nn.Parameter(torch.randn(1, num_image_tokens, cond_dim))
-        self.null_image_hiddens = nn.Parameter(torch.randn(1, time_cond_dim))
+        self.null_video_embed = nn.Parameter(torch.randn(1, num_image_tokens, cond_dim))
+        self.null_video_hiddens = nn.Parameter(torch.randn(1, time_cond_dim))
 
         self.max_text_len = max_text_len
         self.null_text_embed = nn.Parameter(torch.randn(1, max_text_len, cond_dim))
@@ -341,17 +439,20 @@ class Unet3D(nn.Module):
 
         # downsample klass
 
-        downsample_klass = Downsample
         if cross_embed_downsample:
             downsample_klass = partial(
-                CrossEmbedLayer, kernel_sizes=cross_embed_downsample_kernel_sizes
+                CrossEmbedLayer3D, kernel_sizes=cross_embed_downsample_kernel_sizes
             )
+        else:
+            downsample_klass = Downsample3D
 
         # upsample klass
 
-        upsample_klass = (
-            NearestUpsample if not pixel_shuffle_upsample else PixelShuffleUpsample
-        )
+        if pixel_shuffle_upsample:
+            # NOTE: Just applying PixelShuffleUpsample frame-wise.
+            upsample_klass = PixelShuffleUpsample3D
+        else:
+            upsample_klass = NearestUpsample3D
 
         # prepare resnet klass
 
@@ -397,11 +498,13 @@ class Unet3D(nn.Module):
             dim_layer = dim_out if memory_efficient else dim_in
             skip_connect_dims.append(dim_layer)
 
-            attention = nn.Identity()
+            # TODO: Implement attention for 3D
             if layer_self_attn:
                 attention = create_self_attn(dim_layer)
             elif sparse_attn:
                 attention = Residual(LinearAttention(dim_layer, **attn_kwargs))
+            else:
+                attention = nn.Identity()
 
             self.downs.append(
                 nn.ModuleList(
@@ -430,7 +533,7 @@ class Unet3D(nn.Module):
                         attention,
                         downsample_klass(dim_layer, dim_out=dim_out)
                         if not is_last and not memory_efficient
-                        else nn.Conv2d(dim_layer, dim_out, 1),
+                        else nn.Conv3d(dim_layer, dim_out, 1),
                     ]
                 )
             )
@@ -471,11 +574,12 @@ class Unet3D(nn.Module):
 
             skip_connect_dim = skip_connect_dims.pop()
 
-            attention = nn.Identity()
             if layer_self_attn:
                 attention = create_self_attn(dim_out)
             elif sparse_attn:
                 attention = Residual(LinearAttention(dim_out, **attn_kwargs))
+            else:
+                attention = nn.Identity()
 
             upsample_combiner_dims.append(dim_out)
 
@@ -529,11 +633,11 @@ class Unet3D(nn.Module):
 
         out_dim_in = dim + (channels if lowres_cond else 0)
 
-        self.to_out = nn.Conv2d(
+        self.to_out = nn.Conv3d(
             out_dim_in,
             self.channels_out,
-            kernel_size=final_conv_kernel_size,
-            padding=final_conv_kernel_size // 2,
+            kernel_size=(1, final_conv_ksize, final_conv_ksize),
+            padding=(0, final_conv_ksize // 2, final_conv_ksize // 2),
         )
 
         zero_init_(self.to_out)  # since both OpenAI and @crowsonkb are doing it
@@ -557,7 +661,7 @@ class Unet3D(nn.Module):
         if (
             lowres_cond == self.lowres_cond
             and channels == self.channels
-            and cond_on_image_embeds == self.cond_on_image_embeds
+            and cond_on_image_embeds == self.cond_on_video_embeds
             and cond_on_text_encodings == self.cond_on_text_encodings
             and lowres_noise_cond == self.lowres_noise_cond
             and channels_out == self.channels_out
@@ -588,8 +692,8 @@ class Unet3D(nn.Module):
 
     def forward(
         self,
-        x,
-        time,
+        x: torch.Tensor,
+        time: torch.Tensor,
         *,
         video_embed,
         lowres_cond_video=None,
@@ -602,6 +706,24 @@ class Unet3D(nn.Module):
         disable_checkpoint=False,
         self_cond=None,
     ):
+        """_summary_
+        Args:
+            x ( b, c, t, h, w ): _description_
+            time ( b, ): _description_
+            video_embed (_type_): _description_
+            lowres_cond_video (_type_, optional): _description_. Defaults to None.
+            lowres_noise_level (_type_, optional): _description_. Defaults to None.
+            text_encodings (_type_, optional): _description_. Defaults to None.
+            video_cond_drop_prob (float, optional): _description_. Defaults to 0.0.
+            text_cond_drop_prob (float, optional): _description_. Defaults to 0.0.
+            blur_sigma (_type_, optional): _description_. Defaults to None.
+            blur_kernel_size (_type_, optional): _description_. Defaults to None.
+            disable_checkpoint (bool, optional): _description_. Defaults to False.
+            self_cond (_type_, optional): _description_. Defaults to None.
+
+        Returns:
+            _type_: _description_
+        """
         batch_size, device = x.shape[0], x.device
 
         # add low resolution conditioning, if present
@@ -614,32 +736,33 @@ class Unet3D(nn.Module):
 
         if self.self_cond:
             self_cond = default(self_cond, lambda: torch.zeros_like(x))
-            x = torch.cat((x, self_cond), dim=1)  # FIXME: should this be dim=2?
+            x = torch.cat((x, self_cond), dim=1)
 
         # concat low resolution conditioning
 
         if exists(lowres_cond_video):
-            x = torch.cat((x, lowres_cond_video), dim=1)  # FIXME: dim=2?
+            # NOTE: Concatenation for channels
+            x = torch.cat((x, lowres_cond_video), dim=1)
 
         # initial convolution
 
-        x = self.init_conv(x)
+        x = self.init_conv(x)  # ( b, c, t, h, w )
         r = x.clone()  # final residual
 
-        # time conditioning
+        # time conditioning (same as image diffusion)
 
-        time = time.type_as(x)
-        time_hiddens = self.to_time_hiddens(time)
+        time = time.type_as(x)  # ( b, )
+        time_hiddens = self.to_time_hiddens(time)  # ( b, time_cond_dim )
 
-        time_tokens = self.to_time_tokens(time_hiddens)
-        t = self.to_time_cond(time_hiddens)
+        time_tokens = self.to_time_tokens(
+            time_hiddens
+        )  # ( b, num_time_tokens, cond_dim )
+        t = self.to_time_cond(time_hiddens)  # ( b, time_cond_dim )
 
         # low res noise conditioning (similar to time above)
 
         if exists(lowres_noise_level):
-            assert exists(
-                self.to_lowres_noise_cond
-            ), "lowres_noise_cond must be set to True on instantiation of the unet in order to conditiong on lowres noise"
+            assert exists(self.to_lowres_noise_cond), "lowres_noise_cond must be set to True on instantiation of the unet in order to conditiong on lowres noise"  # fmt: skip
             lowres_noise_level = lowres_noise_level.type_as(x)
             t = t + self.to_lowres_noise_cond(lowres_noise_level)
 
@@ -647,14 +770,14 @@ class Unet3D(nn.Module):
 
         video_keep_mask = prob_mask_like(
             (batch_size,), 1 - video_cond_drop_prob, device=device
-        )
+        )  # ( b, )
 
         text_keep_mask = prob_mask_like(
             (batch_size,), 1 - text_cond_drop_prob, device=device
-        )
-        text_keep_mask = rearrange(text_keep_mask, "b -> b 1 1")
+        )  # ( b, )
+        text_keep_mask = rearrange(text_keep_mask, "b -> b 1 1")  # ( b, 1, 1 )
 
-        # image embedding to be summed to time embedding
+        # video embedding to be summed to time embedding
         # discovered by @mhh0318 in the paper
 
         if exists(video_embed) and exists(self.to_video_hiddens):
@@ -662,6 +785,7 @@ class Unet3D(nn.Module):
             video_keep_mask_hidden = rearrange(video_keep_mask, "b -> b 1")
             null_video_hiddens = self.null_video_hiddens.to(video_hiddens.dtype)
 
+            # mask hiddens with some probability
             video_hiddens = torch.where(
                 video_keep_mask_hidden, video_hiddens, null_video_hiddens
             )
@@ -671,17 +795,16 @@ class Unet3D(nn.Module):
         # mask out image embedding depending on condition dropout
         # for classifier free guidance
 
-        image_tokens = None
+        video_tokens = None
 
-        if self.cond_on_image_embeds:
-            image_keep_mask_embed = rearrange(video_keep_mask, "b -> b 1 1")
-            image_tokens = self.image_to_tokens(video_embed)
-            null_image_embed = self.null_image_embed.to(
-                image_tokens.dtype
-            )  # for some reason pytorch AMP not working
+        if self.cond_on_video_embeds:
+            video_keep_mask_embed = rearrange(video_keep_mask, "b -> b 1 1")
+            video_tokens = self.video_to_tokens(video_embed)
+            null_video_embed = self.null_video_embed.to(video_tokens.dtype)
+            # for some reason pytorch AMP not working
 
-            image_tokens = torch.where(
-                image_keep_mask_embed, image_tokens, null_image_embed
+            video_tokens = torch.where(
+                video_keep_mask_embed, video_tokens, null_video_embed
             )
 
         # take care of text encodings (optional)
@@ -725,12 +848,12 @@ class Unet3D(nn.Module):
 
         # main conditioning tokens (c)
 
-        c = time_tokens
+        c = time_tokens  # ( b, num_time_tokens, cond_dim )
 
-        if exists(image_tokens):
-            c = torch.cat((c, image_tokens), dim=-2)
+        if exists(video_tokens):
+            c = torch.cat((c, video_tokens), dim=-2)
 
-        # text and image conditioning tokens (mid_c)
+        # text and video conditioning tokens (mid_c)
         # to save on compute, only do cross attention based conditioning on the inner most layers of the Unet
 
         mid_c = c if not exists(text_tokens) else torch.cat((c, text_tokens), dim=-2)
@@ -829,7 +952,10 @@ class Unet3D(nn.Module):
 
 
 class UnetTemporalConv(Unet):
-    """NOTE: This is very preliminary implementation before implementing Unet3D."""
+    """
+    NOTE: This is very preliminary implementation and probably doesn't work.
+    TODO: Implement Unet3D
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -894,6 +1020,7 @@ class UnetTemporalConv(Unet):
             image_cond_drop_prob=video_cond_drop_prob,
             **kwargs,
         )
+
         # ( b * t, c * 2, h, w )
         # cprint(f"{x.shape}, {self.learned_var}, {self.channels_out}", "red")
 
@@ -1207,7 +1334,7 @@ class VideoDecoder(nn.Module):
             one_unet_learned_var,
             lowres_noise_cond,
         ) in enumerate(zip(unets, vaes, learned_variance, use_noise_for_lowres_cond)):
-            assert isinstance(one_unet, UnetTemporalConv)
+            assert isinstance(one_unet, UnetTemporalConv) or isinstance(one_unet, Unet3D)
             assert isinstance(one_vae, (VQGanVAE, NullVQGanVAE))
 
             is_first = ind == 0
@@ -1995,7 +2122,7 @@ class VideoDecoder(nn.Module):
                 # prepare low resolution conditioning for upsamplers
 
                 lowres_cond_vid = lowres_noise_level = None
-                shape = (batch_size, frame_number, channel, frame_size, frame_size)
+                shape = (batch_size, channel, frame_number, frame_size, frame_size)
                 
                 if unet.lowres_cond:
                     lowres_cond_vid = temporal_apply(
@@ -2021,7 +2148,7 @@ class VideoDecoder(nn.Module):
 
                 is_latent_diffusion = isinstance(vae, VQGanVAE)
                 frame_size = vae.get_encoded_fmap_size(frame_size)
-                shape = (batch_size, frame_number, vae.encoded_dim, frame_size, frame_size)
+                shape = (batch_size, vae.encoded_dim, frame_number, frame_size, frame_size)
 
                 lowres_cond_vid = maybe(vae.encode)(lowres_cond_vid)
 
@@ -2047,8 +2174,9 @@ class VideoDecoder(nn.Module):
                     # inpaint_resample_times=inpaint_resample_times,
                 )
 
-                vid = vae.decode(vid.view(-1, *vid.shape[2:]))
-                vid = vid.view(batch_size, frame_number, *vid.shape[1:])
+                vid = temporal_apply(vae.decode, vid)
+                # vid = vae.decode(vid.view(-1, *vid.shape[2:]))
+                # vid = vid.view(batch_size, frame_number, *vid.shape[1:])
 
             if exists(stop_at_unet_number) and stop_at_unet_number == unet_number:
                 break
@@ -2208,10 +2336,11 @@ class DALLE2Video(nn.Module):
         #     text = [text] if not isinstance(text, (list, tuple)) else text
         #     text = tokenizer.tokenize(text).to(device)
 
-        b, d, t = text_embed.shape
-
         if self.temporal_emb:
+            b, d, t = text_embed.shape
             text_embed = text_embed.permute(0, 2, 1).reshape(-1, d)
+        else:
+            b, d = text_embed.shape
 
         video_embed = self.prior.sample(
             text_embed,
