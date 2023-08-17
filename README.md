@@ -1,13 +1,14 @@
 # DALLE2-video
 
+## Status
+
+Something similar to Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458) is implemented and working.
+
 ## TODOs
 
-- [ ] `Unet3D`
-  - [ ] `Block3D`
-  - [ ] `ResnetBlock3D`
-  - [ ] `CrossEmbedLayer3D`
-- [ ] Temporal super-resolution model (a mode in Unet3D?)
-- [ ] Learning variance for video diffusion significantly unstabilizes training. How to compensate or just stop learning variance?
+- [x] Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458)
+- [ ] Temporal super-resolution proposed in [Ho et al., Oct 2022](https://arxiv.org/abs/2210.02303)
+- [ ] Learning variance for video diffusion significantly unstabilized the training. Is there a way to stably learn variance?
 
 ## References
 
