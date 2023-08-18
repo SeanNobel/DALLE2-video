@@ -2194,7 +2194,7 @@ class VideoDecoder(nn.Module):
     ):
         """Given a unet and video, runs denoising process once.
         Args:
-            video: ( batch_size, frames, channels, height, width )
+            video: ( batch_size, channels, frames, height, width )
             video_embed (_type_, optional): _description_. Defaults to None.
             text (_type_, optional): _description_. Defaults to None.
             text_encodings (_type_, optional): _description_. Defaults to None.
@@ -2203,9 +2203,7 @@ class VideoDecoder(nn.Module):
         Returns:
             _type_: _description_
         """
-        assert not (
-            self.num_unets > 1 and not exists(unet_number)
-        ), f"you must specify which unet you want trained, from a range of 1 to {self.num_unets}, if you are training cascading DDPM (multiple unets)"
+        assert not (self.num_unets > 1 and not exists(unet_number)), f"you must specify which unet you want trained, from a range of 1 to {self.num_unets}, if you are training cascading DDPM (multiple unets)"  # fmt: skip
         unet_number = default(unet_number, 1)
         unet_index = unet_number - 1
 
@@ -2220,9 +2218,9 @@ class VideoDecoder(nn.Module):
         predict_v = self.predict_v[unet_index]
         random_crop_size = self.random_crop_sizes[unet_index]
         learned_variance = self.learned_variance[unet_index]
-        b, t, c, h, w, device = *video.shape, video.device
+        b, c, t, h, w, device = *video.shape, video.device
 
-        assert video.shape[2] == self.channels
+        assert video.shape[1] == self.channels
         assert h >= target_frame_size and w >= target_frame_size
 
         # Random timesteps to sample from.
@@ -2270,16 +2268,10 @@ class VideoDecoder(nn.Module):
         vae.eval()
         with torch.no_grad():
             # NOTE: VAE doesn't do temporal information mixing.
-            video = vae.encode(video.view(-1, *video.shape[2:]))
-            video = video.view(b, t, *video.shape[1:])
+            video = temporal_apply(vae.encode, video)
 
             if exists(lowres_cond_video):
-                lowres_cond_video = vae.encode(
-                    lowres_cond_video.view(-1, *lowres_cond_video.shape[2:])
-                )
-                lowres_cond_video = lowres_cond_video.view(
-                    b, t, *lowres_cond_video.shape[1:]
-                )
+                lowres_cond_video = temporal_apply(vae.encode, lowres_cond_video)
 
         logger.debug(f"video for Unet {unet_number}: {video.shape}")
         logger.debug(f"lowres_cond_video for Unet {unet_number}: {lowres_cond_video.shape if exists(lowres_cond_video) else None}")  # fmt: skip
