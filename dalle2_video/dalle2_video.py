@@ -9,7 +9,8 @@ import torch.nn as nn
 from x_clip import CLIP
 from coca_pytorch import CoCa
 
-from dalle2_video._dalle2_pytorch import *
+# from dalle2_video._dalle2_pytorch import *
+from dalle2_pytorch.dalle2_pytorch import *
 from dalle2_pytorch.vqgan_vae import NullVQGanVAE, VQGanVAE
 
 logger = logging.getLogger("dalle2_video")
@@ -1505,7 +1506,7 @@ class VideoDecoder(nn.Module):
         return UnetOutput(output, var_interp_frac_unnormalized)
 
     @contextmanager
-    def one_unet_in_gpu(self, unet_number=None, unet=None):
+    def one_unet_in_gpu(self, unet_number=None, unet=None, cuda="cuda"):
         assert exists(unet_number) ^ exists(unet)
 
         if exists(unet_number):
@@ -1513,9 +1514,9 @@ class VideoDecoder(nn.Module):
 
         # devices
 
-        cuda, cpu = torch.device("cuda"), torch.device("cpu")
+        cuda, cpu = torch.device(cuda), torch.device("cpu")
 
-        self.cuda()
+        self.to(cuda)
 
         devices = [module_device(unet) for unet in self.unets]
 
@@ -2066,6 +2067,7 @@ class VideoDecoder(nn.Module):
         # inpaint_mask=None,
         # inpaint_resample_times=5,
         one_unet_in_gpu_at_time=True,
+        cuda="cuda",
     ):
         assert self.unconditional or exists(video_embed), "image embed must be present on sampling from decoder unless if trained unconditionally"  # fmt: skip
 
@@ -2113,7 +2115,7 @@ class VideoDecoder(nn.Module):
                 continue  # It's the easiest way to do it
 
             context = (
-                self.one_unet_in_gpu(unet=unet)
+                self.one_unet_in_gpu(unet=unet, cuda=cuda)
                 if is_cuda and one_unet_in_gpu_at_time
                 else null_context()
             )
@@ -2299,7 +2301,13 @@ class VideoDecoder(nn.Module):
 
 class DALLE2Video(nn.Module):
     def __init__(
-        self, *, prior, decoder, temporal_emb: bool = False, prior_num_samples=2
+        self,
+        *,
+        prior,
+        decoder,
+        temporal_emb: bool = False,
+        prior_num_samples=2,
+        decoder_cuda="cuda",
     ) -> None:
         super().__init__()
         assert isinstance(prior, DiffusionPrior)
@@ -2311,6 +2319,8 @@ class DALLE2Video(nn.Module):
 
         self.prior_num_samples = prior_num_samples
         self.decoder_need_text_cond = self.decoder.condition_on_text_encodings
+
+        self.decoder_cuda = decoder_cuda
 
     @torch.no_grad()
     @eval_decorator
@@ -2351,6 +2361,7 @@ class DALLE2Video(nn.Module):
             text=text_cond,
             text_encodings=text_embed,
             cond_scale=cond_scale,
+            cuda=self.decoder_cuda,
         )
 
         # if one_text:
