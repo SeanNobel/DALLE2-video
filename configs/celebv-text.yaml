@@ -1,0 +1,15 @@
+texts_dirs:
+  root: /mnt/tsukuyomi/sensho/CelebV-Text/texts/
+  details: face40_details_new/
+  additional:
+    action: action_dur/
+    emotion: emotion/
+    light_direction: light_dir/
+    light_intensity: light_intensity/
+    light_temp: light_color_temp/
+
+videos_dir: /mnt/tsukuyomi/sensho/CelebV-Text/videos/celebvtext_6/
+
+clip_model: ViT-B/32
+
+log_level: INFO

@@ -4,6 +4,39 @@
 
 Something similar to Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458) is implemented and working.
 
+## Training on CelebV-Text dataset
+
+Download CelebV-Text dataset from their [GitHub](https://github.com/CelebV-Text/CelebV-Text#download).
+
+After untaring the dataset, the folder structure should look like this:
+
+```
+├── texts
+│   ├── action_dur
+│   ├── emotion
+│   ├── face40_details_new
+│   ├── light_colot_temp
+│   ├── light_dir
+│   └── light_intensity
+└── videos
+    ├── celebvtext_6
+    └── ...
+```
+
+Tokenize text and save as a `.pt` file (saved under `texts/`).
+
+```bash
+python tokenize_texts.py
+```
+
+Preprocess videos and save as a `.h5` file (saved under `videos/`).
+
+- When training, `CelebVTextDataset` only reads pointers to the videos. The videos are loaded in the collate function. This is to avoid loading all videos into memory at once.
+
+```bash
+python preprocess_videos.py
+```
+
 ## TODOs
 
 - [x] Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458)

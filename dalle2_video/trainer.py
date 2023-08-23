@@ -1,3 +1,4 @@
+import sys
 from termcolor import cprint
 from tqdm import tqdm
 
@@ -47,10 +48,7 @@ class VideoDecoderTrainer(nn.Module):
             partial(cast_tuple, length=self.num_unets),
             (lr, wd, eps, warmup_steps, cosine_decay_max_steps),
         )
-
-        assert all(
-            [unet_lr <= 1e-2 for unet_lr in lr]
-        ), "your learning rate is too high, recommend sticking with 1e-4, at most 5e-4"
+        assert all([unet_lr <= 1e-2 for unet_lr in lr]), "your learning rate is too high, recommend sticking with 1e-4, at most 5e-4"  # fmt: skip
 
         optimizers = []
         schedulers = []
@@ -116,9 +114,8 @@ class VideoDecoderTrainer(nn.Module):
                 "no": torch.float,
             }
             precision_type = cast_type_map[accelerator.mixed_precision]
-            assert (
-                precision_type == torch.float
-            ), "DeepSpeed currently only supports float32 precision when using on the fly embedding generation from clip"
+            assert (precision_type == torch.float), "DeepSpeed currently only supports float32 precision when using on the fly embedding generation from clip"  # fmt: skip
+
             clip = decoder.clip
             clip.to(precision_type)
 
