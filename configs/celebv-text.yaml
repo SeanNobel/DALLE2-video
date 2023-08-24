@@ -8,7 +8,12 @@ texts_dirs:
     light_intensity: light_intensity/
     light_temp: light_color_temp/
 
-videos_dir: /mnt/tsukuyomi/sensho/CelebV-Text/videos/celebvtext_6/
+videos_dirs:
+  root: /mnt/tsukuyomi/sensho/CelebV-Text/videos/
+  untar: celebvtext_6/
+
+seq_len: 5
+fps: 30
 
 clip_model: ViT-B/32
 

@@ -4,12 +4,13 @@ import torch
 from torchvision.transforms import Compose
 import cv2
 from PIL import Image
+import h5py
 import hydra
 from omegaconf import DictConfig
 from glob import glob
 from tqdm import tqdm
 from termcolor import cprint
-from typing import Tuple, List
+from typing import Optional
 
 import clip
 
@@ -42,33 +43,34 @@ def load_text(details_path: str, texts_dirs: DictConfig):
     return " ".join(text)
 
 
-def preprocess_and_save_video(video_path: str, preprocess: Compose) -> None:
-    """Preprocesses a video. And
+def preprocess_video(
+    video_path: str, preprocess: Compose, num_frames: int
+) -> Optional[np.ndarray]:
+    """Preprocesses a video. Although the original videos have different number of frames,
+    this function takes the first `num_frames` of a video.
     Args:
-        video_path (str): _description_
+        video_path: _description_
+        preprocess: Resize(size=224) -> CenterCrop(size=224) -> ToTensor() -> Normalize()
+        num_frames: _description_
     Returns:
-        video (torch.Tensor): _description_
+        video: ( c, t, h, w )
     """
     cap = cv2.VideoCapture(video_path)
-    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    # frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
 
     video = []
-    pbar = tqdm(total=frame_count, desc="Preprocessing video")
-    while cap.isOpened():
+    for _ in range(num_frames):
         ret, frame = cap.read()
+
         if not ret:
-            break
+            return None
 
-        # frame = Image.fromarray(frame)
-        # frame = preprocess(frame)
+        frame = Image.fromarray(frame)
+        frame = preprocess(frame)
 
-        video.append(frame)
+        video.append(frame.numpy())
 
-        pbar.update(1)
-
-    # video = torch.stack(video)
-    video = np.stack(video)
-    print(video.shape)
+    return np.stack(video).transpose(1, 0, 2, 3)
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="celebv-text")
@@ -77,22 +79,42 @@ def run(args: DictConfig) -> None:
         os.path.join(args.texts_dirs.root, args.texts_dirs.details, "*.txt")
     )
 
-    _, preprocess = clip.load("ViT-B/32")
+    _, img_preproc = clip.load("ViT-B/32")
 
     texts = []
+
+    num_frames = int(args.seq_len * args.fps)
+    hdf = h5py.File(os.path.join(args.videos_dirs.root, "preprocessed.h5"), "w")
+    videos = hdf.require_dataset(
+        name="videos",
+        shape=(0, 3, num_frames, 224, 224),
+        maxshape=(None, 3, num_frames, 224, 224),
+        dtype=np.float32,
+    )
+
     for details_path in tqdm(details_paths, desc="Preprocessing"):
         video_path = os.path.join(
-            args.videos_dir, f"{os.path.splitext(os.path.basename(details_path))[0]}.mp4"
+            args.videos_dirs.root,
+            args.videos_dirs.untar,
+            f"{os.path.splitext(os.path.basename(details_path))[0]}.mp4",
         )
 
         if not os.path.exists(video_path):
             cprint(f"Video {video_path} not found.", "yellow")
             continue
 
+        video = preprocess_video(video_path, img_preproc, num_frames)
+        if video is None:
+            cprint(f"Video {video_path} has less than {num_frames} frames.", "yellow")
+            continue
+
+        videos.resize(videos.shape[0] + 1, axis=0)
+        videos[-1] = video
+
         text = load_text(details_path, args.texts_dirs)
         texts.append(text)
 
-        preprocess_and_save_video(video_path, preprocess)
+    hdf.close()
 
     cprint(f"Tokenizing {len(texts)} texts.", "cyan")
     texts = clip.tokenize(texts, truncate=True)

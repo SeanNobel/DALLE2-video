@@ -13,3 +13,5 @@ gdown
 termcolor
 natsort
 glob
+h5py
+matplotlib

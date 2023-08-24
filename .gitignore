@@ -1,4 +1,6 @@
 __pycache__/
 outputs/
+notebooks/
+logs/
 
 _dalle2_pytorch.py
