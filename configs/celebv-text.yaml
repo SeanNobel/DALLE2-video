@@ -7,14 +7,41 @@ texts_dirs:
     light_direction: light_dir/
     light_intensity: light_intensity/
     light_temp: light_color_temp/
+  tokenized: data/texts/tokenized.pt
 
 videos_dirs:
   root: /mnt/tsukuyomi/sensho/CelebV-Text/videos/
   untar: celebvtext_6/
+  preprocessed: data/videos/preprocessed.h5
 
 seq_len: 5
 fps: 30
 
 clip_model: ViT-B/32
 
+video_encoder:
+  frame_size: 128
+  patch_size: 32
+  dim: 512
+  depth: 2
+  in_channels: 3
+
+train_name: test
+train_ratio: 0.8
+batch_size: 64
+lr: 0.001
+lr_scheduler: multistep # cosine or multistep
+lr_multistep_mlstns: [0.4, 0.6, 0.8, 0.9]
+lr_step_gamma: 0.5
+epochs: 500
+reduction: mean
+init_temperature: 5.0
+accum_grad: False
+
+seed: 1234
+cuda_id: 0
+num_workers: 4
+
 log_level: INFO
+
+use_wandb: False

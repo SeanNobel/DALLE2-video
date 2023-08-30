@@ -38,8 +38,8 @@ def run(args: DictConfig) -> None:
     #       Dataloader
     # -----------------------
     dataset = CelebVTextDataset(
-        texts_path=os.path.join(args.texts_dirs.root, "tokenized.pt"),
-        videos_path=os.path.join(args.videos_dirs.root, "preprocessed.h5"),
+        texts_path=os.path.join(args.texts_dirs.tokenized),
+        videos_path=os.path.join(args.videos_dirs.preprocessed),
     )
 
     train_size = int(len(dataset) * args.train_ratio)
@@ -147,8 +147,6 @@ def run(args: DictConfig) -> None:
             with torch.no_grad():
                 stime = time()
 
-                # NOTE: sequential_apply doesn't do sequential application if batch_size == X.shape[0].
-
                 text_embeds = sequential_apply(
                     texts,
                     clip_model.encode_text,
@@ -168,7 +166,7 @@ def run(args: DictConfig) -> None:
                 loss = loss_func(video_embeds, text_embeds)
 
                 test_top1_acc, test_top10_acc, _ = classifier(
-                    text_embeds, video_embeds, sequential=args.test_with_whole
+                    text_embeds, video_embeds, sequential=False
                 )
 
             test_losses.append(loss.item())
@@ -199,11 +197,11 @@ def run(args: DictConfig) -> None:
 
         scheduler.step()
 
-        trained_models.save(run_dir)
+        torch.save(video_encoder.state_dict(), os.path.join(run_dir, "video_encoder_last.pt"))  # fmt: skip
 
         if np.mean(test_losses) < min_test_loss:
             cprint(f"New best. Saving models to {run_dir}", color="cyan")
-            trained_models.save(run_dir, best=True)
+            torch.save(video_encoder.state_dict(), os.path.join(run_dir, "video_encoder_best.pt"))  # fmt: skip
 
             min_test_loss = np.mean(test_losses)
 
