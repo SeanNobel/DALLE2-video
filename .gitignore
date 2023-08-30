@@ -2,5 +2,9 @@ __pycache__/
 outputs/
 notebooks/
 logs/
+wandb/
+
+data/*
+!data/.gitkeep
 
 _dalle2_pytorch.py

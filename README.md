@@ -23,19 +23,17 @@ After untaring the dataset, the folder structure should look like this:
     └── ...
 ```
 
-Tokenize text and save as a `.pt` file (saved under `texts/`).
+Run preprocessing.
 
 ```bash
-python tokenize_texts.py
+python preprocess.py
 ```
 
-Preprocess videos and save as a `.h5` file (saved under `videos/`).
+- Tokenizes text and save as a `.pt` file (saved under `texts/`).
 
-- When training, `CelebVTextDataset` only reads pointers to the videos. The videos are loaded in the collate function. This is to avoid loading all videos into memory at once.
+- Preprocesses videos and save as a `.h5` file (saved under `videos/`).
 
-```bash
-python preprocess_videos.py
-```
+  - When training, `CelebVTextDataset` only reads pointers to the videos. The videos are loaded in the collate function. This is to avoid loading all videos into memory at once.
 
 ## TODOs
 

@@ -15,3 +15,4 @@ natsort
 glob
 h5py
 matplotlib
+wandb
