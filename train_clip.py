@@ -9,10 +9,13 @@ from termcolor import cprint
 from time import time
 
 import clip
+from accelerate import Accelerator, DistributedType
 
 from dalle2_video.video_encoder import ViViT
 from dalle2_video.datasets import CelebVTextDataset, CelebVTextCollator
 from dalle2_video.utils import CLIPLoss, Classifier, sequential_apply
+
+CAST_TYPE_MAP = {"fp16": torch.half, "bp16": torch.bfloat16, "no": torch.float}
 
 
 @hydra.main(version_base=None, config_path="configs", config_name="celebv-text")
@@ -99,6 +102,17 @@ def run(args: DictConfig) -> None:
     # -----------------------
     #     Strat training
     # -----------------------
+    accelerator = Accelerator()
+
+    if accelerator.distributed_type == DistributedType.DEEPSPEED:
+        precision = CAST_TYPE_MAP[accelerator.mixed_precision]
+        assert (precision == torch.float), "DeepSpeed currently only supports float32 precision when using on the fly embedding generation from clip"  # fmt: skip
+        clip_model.to(precision)
+
+    video_encoder, optimizer, scheduler, train_loader, test_loader = accelerator.prepare(
+        video_encoder, optimizer, scheduler, train_loader, test_loader
+    )
+
     min_test_loss = float("inf")
 
     for epoch in range(args.epochs):
