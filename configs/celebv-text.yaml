@@ -12,7 +12,7 @@ texts_dirs:
 videos_dirs:
   root: /mnt/tsukuyomi/sensho/CelebV-Text/videos/
   untar: celebvtext_6/
-  preprocessed: data/videos/preprocessed.h5
+  preprocessed: data/videos/chunked2.h5
 
 seq_len: 5
 fps: 30
@@ -20,8 +20,8 @@ fps: 30
 clip_model: ViT-B/32
 
 video_encoder:
-  frame_size: 128
-  patch_size: 32
+  frame_size: 224
+  patch_size: 28
   dim: 512
   depth: 2
   in_channels: 3
@@ -40,7 +40,7 @@ accum_grad: False
 
 seed: 1234
 cuda_id: 0
-num_workers: 4
+num_workers: 1 # Probably best to set 1 when using h5py or DeepSpeed (from completely different reasons)
 
 log_level: INFO
 

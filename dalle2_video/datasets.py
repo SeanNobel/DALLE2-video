@@ -31,7 +31,8 @@ class CelebVTextCollator(nn.Module):
         # NOTE: item[2] is subject_idx and item[1] is sample_idx
         videos = np.stack([self.videos_ref[item[1]] for item in batch])
         # ( b, c, t, h, w )
-        videos = torch.from_numpy(videos)
+        videos = torch.from_numpy(videos).permute(0, 2, 1, 3, 4)
+        # ( b, t, c, h, w )
 
         return texts, videos
 
