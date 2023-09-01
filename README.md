@@ -8,7 +8,7 @@ Something similar to Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/
 
 Download CelebV-Text dataset from their [GitHub](https://github.com/CelebV-Text/CelebV-Text#download).
 
-After untaring the dataset, the folder structure should look like this:
+- After untaring the dataset, the folder structure should look like this:
 
 ```
 ├── texts
@@ -34,6 +34,20 @@ python preprocess.py
 - Preprocesses videos and save as a `.h5` file (saved under `videos/`).
 
   - When training, `CelebVTextDataset` only reads pointers to the videos. The videos are loaded in the collate function. This is to avoid loading all videos into memory at once.
+
+Configure DeepSpeed
+
+```bash
+accelerate config
+```
+
+- You should answer yes the question that asks if you want to use a config file for DeepSpeed to use the example json file that I provided `configs/zero_stage3_offload_config.json`
+
+Run CLIP training
+
+```bash
+accelerate launch train_clip.py use_wandb=True
+```
 
 ## TODOs
 
