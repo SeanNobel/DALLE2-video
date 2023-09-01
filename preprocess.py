@@ -84,11 +84,13 @@ def run(args: DictConfig) -> None:
     texts = []
 
     num_frames = int(args.seq_len * args.fps)
+    shape = (3, num_frames, 224, 224)
     hdf = h5py.File(os.path.join(args.videos_dirs.root, "preprocessed.h5"), "w")
     videos = hdf.require_dataset(
         name="videos",
-        shape=(0, 3, num_frames, 224, 224),
-        maxshape=(None, 3, num_frames, 224, 224),
+        shape=(0, *shape),
+        chunks=(1, *shape),
+        maxshape=(None, *shape),
         dtype=np.float32,
     )
 
