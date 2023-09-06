@@ -43,6 +43,10 @@ accelerate config
 
 - You should answer yes the question that asks if you want to use a config file for DeepSpeed to use the example json file that I provided `configs/zero_stage3_offload_config.json`
 
+  - When using `deepspeed_config_file` (json), variable `gradient_accumulation_steps` is ignored, so we need to specify that from train config file (yaml).
+
+  - For more details refer to [this page](https://huggingface.co/docs/accelerate/usage_guides/deepspeed#deepspeed-config-file).
+
 Run CLIP training
 
 ```bash
@@ -52,6 +56,7 @@ accelerate launch train_clip.py use_wandb=True
 ## TODOs
 
 - [x] Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458)
+- [ ] Support ZeRO stage 3 training with [DeepSpeed](https://huggingface.co/docs/accelerate/usage_guides/deepspeed#deepspeed-config-file)
 - [ ] Temporal super-resolution proposed in [Ho et al., Oct 2022](https://arxiv.org/abs/2210.02303)
 - [ ] Learning variance for video diffusion significantly unstabilized the training. Is there a way to stably learn variance?
 
