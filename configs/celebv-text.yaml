@@ -38,6 +38,9 @@ reduction: mean
 init_temperature: 5.0
 accum_grad: False
 
+deepspeed:
+  gradient_accumulation_steps: 1
+
 seed: 1234
 cuda_id: 0
 num_workers: 1 # Probably best to set 1 when using h5py or DeepSpeed (from completely different reasons)
