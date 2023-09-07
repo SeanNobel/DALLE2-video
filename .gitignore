@@ -2,6 +2,7 @@ outputs/
 notebooks/
 logs/
 wandb/
+runs/
 
 data/*
 !data/.gitkeep
