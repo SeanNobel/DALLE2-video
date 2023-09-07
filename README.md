@@ -4,6 +4,10 @@
 
 Something similar to Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458) is implemented and working.
 
+- Sep. 7
+  - CLIP trainingはshardingなしでできたので，とりあえず走らせた（1エポック5時間程度）．
+  - Shardingなしのdecoder訓練スクリプトを実装．
+
 ## Training on CelebV-Text dataset
 
 Download CelebV-Text dataset from their [GitHub](https://github.com/CelebV-Text/CelebV-Text#download).
