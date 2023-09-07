@@ -109,7 +109,8 @@ class ViViT(nn.Module):
         dim_head: int = 64,
         dropout: float = 0.0,
         emb_dropout: float = 0.0,
-        scale_dim: int = 4,
+        scale_dim_attn: int = 4,
+        scale_dim_conv: int = 5,
     ):
         super().__init__()
         assert frame_size % patch_size == 0, "Image dimensions must be divisible by the patch size."  # fmt: skip
@@ -126,27 +127,35 @@ class ViViT(nn.Module):
         self.pos_embedding = nn.Parameter(
             torch.randn(1, num_frames, num_patches + 1, dim)
         )
-        # self.space_token = nn.Parameter(torch.randn(1, 1, dim))
         self.space_transformer = Transformer(
-            dim, depth, heads, dim_head, dim * scale_dim, dropout
+            dim, depth, heads, dim_head, dim * scale_dim_attn, dropout
         )
 
-        # self.temporal_token = nn.Parameter(torch.randn(1, 1, dim))
         self.temporal_transformer = Transformer(
-            dim, depth, heads, dim_head, dim * scale_dim, dropout
+            dim, depth, heads, dim_head, dim * scale_dim_attn, dropout
+        )
+        self.temporal_conv = nn.Sequential(
+            Rearrange("b t d -> b d t"),
+            Rearrange("b d (t s) -> b (d s) t", s=scale_dim_conv),
+            nn.Conv1d(dim * scale_dim_conv, dim, kernel_size=3, padding="same"),
+            Rearrange("b d (t s) -> b (d s) t", s=scale_dim_conv),
+            nn.Conv1d(dim * scale_dim_conv, dim, kernel_size=3, padding="same"),
+            nn.SiLU(),
         )
 
         self.dropout = nn.Dropout(emb_dropout)
-        # self.pool = pool
 
-        # self.mlp_head = nn.Sequential(nn.LayerNorm(dim), nn.Linear(dim, num_classes))
+        to_out_dim = dim * num_frames // (scale_dim_conv**2)
+        self.to_out = nn.Sequential(
+            nn.Flatten(),
+            nn.LayerNorm(to_out_dim),
+            nn.Linear(to_out_dim, dim),
+        )
 
     def forward(self, x):
         x = self.to_patch_embedding(x)
-        b, t, n, _ = x.shape
+        b, _, n, _ = x.shape
 
-        # cls_space_tokens = repeat(self.space_token, '() n d -> b t n d', b=b, t=t)
-        # x = torch.cat((cls_space_tokens, x), dim=2)
         x += self.pos_embedding[:, :, :n]  # self.pos_embedding[:, :, :(n + 1)]
         x = self.dropout(x)
 
@@ -154,12 +163,7 @@ class ViViT(nn.Module):
         x = self.space_transformer(x)
         x = rearrange(x[:, 0], "(b t) ... -> b t ...", b=b)
 
-        # cls_temporal_tokens = repeat(self.temporal_token, '() n d -> b n d', b=b)
-        # x = torch.cat((cls_temporal_tokens, x), dim=1)
-
         h = self.temporal_transformer(x)
-        # print(h.shape)
+        h = self.temporal_conv(h)
 
-        # x = h.mean(dim=1) if self.pool == 'mean' else h[:, 0]
-
-        return h.permute(0, 2, 1)
+        return self.to_out(h)
