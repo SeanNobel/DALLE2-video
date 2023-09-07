@@ -32,7 +32,7 @@ def run(args: DictConfig) -> None:
         wandb.run.name = args.train_name
         wandb.run.save()
 
-    run_dir = os.path.join("runs/celebv-text", args.train_name)
+    run_dir = os.path.join("runs/celebv-text", args.train_name, "clip")
     os.makedirs(run_dir, exist_ok=True)
 
     device = f"cuda:{args.cuda_id}"
@@ -51,21 +51,22 @@ def run(args: DictConfig) -> None:
         dataset,
         lengths=[train_size, test_size],
         generator=torch.Generator().manual_seed(args.seed),
+        # NOTE: it is crucial to set generator seed to keep train/test split consistent across
+        #       CLIP/prior/decoder training.
     )
 
-    collate_fn = CelebVTextCollator(dataset.videos_ref)
-
     loader_args = {
-        "collate_fn": collate_fn,
+        "batch_size": args.batch_size,
+        "collate_fn": dataset.collate_fn,
         "drop_last": True,
         "num_workers": args.num_workers,
         "pin_memory": True,
     }
     train_loader = torch.utils.data.DataLoader(
-        dataset=train_set, batch_size=args.batch_size, shuffle=True, **loader_args
+        dataset=train_set, shuffle=True, **loader_args
     )
     test_loader = torch.utils.data.DataLoader(
-        dataset=test_set, batch_size=test_size, shuffle=False, **loader_args
+        dataset=test_set, shuffle=False, **loader_args
     )
 
     # ---------------
@@ -104,6 +105,8 @@ def run(args: DictConfig) -> None:
     # -----------------------
     accelerator = Accelerator()
 
+    accelerator.gradient_accumulation_steps = args.deepspeed.gradient_accumulation_steps
+
     if accelerator.distributed_type == DistributedType.DEEPSPEED:
         precision = CAST_TYPE_MAP[accelerator.mixed_precision]
         assert (precision == torch.float), "DeepSpeed currently only supports float32 precision when using on the fly embedding generation from clip"  # fmt: skip
@@ -122,7 +125,6 @@ def run(args: DictConfig) -> None:
         train_top1_accs = []
         test_top10_accs = []
         test_top1_accs = []
-        inference_times = []
 
         video_encoder.train()
         if args.accum_grad:
@@ -131,7 +133,9 @@ def run(args: DictConfig) -> None:
         for texts, videos in tqdm(train_loader, desc="Train"):
             texts, videos = texts.to(device), videos.to(device)
 
-            text_embeds = clip_model.encode_text(texts)
+            with torch.no_grad():
+                # NOTE: CLIP model output is originally fp16
+                text_embeds = clip_model.encode_text(texts).float()
 
             video_embeds = video_encoder(videos)
 
@@ -159,23 +163,9 @@ def run(args: DictConfig) -> None:
             texts, videos = texts.to(device), videos.to(device)
 
             with torch.no_grad():
-                stime = time()
+                text_embeds = clip_model.encode_text(texts).float()
 
-                text_embeds = sequential_apply(
-                    texts,
-                    clip_model.encode_text,
-                    args.batch_size,
-                    desc="CLIP text encoder",
-                )
-
-                video_embeds = sequential_apply(
-                    videos,
-                    video_encoder,
-                    args.batch_size,
-                    desc="Video encoder",
-                )
-
-                inference_times.append(time() - stime)
+                video_embeds = video_encoder(videos)
 
                 loss = loss_func(video_embeds, text_embeds)
 
@@ -205,7 +195,6 @@ def run(args: DictConfig) -> None:
                 "test_top1_acc": np.mean(test_top1_accs),
                 "lrate": optimizer.param_groups[0]["lr"],
                 "temp": loss_func.temp.item(),
-                "VisionEncoder avg inference time": np.mean(inference_times),
             }
             wandb.log(performance_now)
 
