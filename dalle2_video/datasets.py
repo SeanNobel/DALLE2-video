@@ -9,6 +9,7 @@ from termcolor import cprint
 from tqdm import tqdm
 import logging
 from typing import List, Optional, Tuple, Union, Any
+from time import time
 
 import clip
 
@@ -36,10 +37,11 @@ class CelebVTextCollator(nn.Module):
         # NOTE: item[2] is subject_idx and item[1] is sample_idx
         videos = np.stack([self.videos_ref[item[1]] for item in batch])
         # ( b, c, t, h, w )
-        videos = torch.from_numpy(videos).permute(0, 2, 1, 3, 4)
-        # ( b, t, c, h, w )
 
-        return x, videos
+        # FIXME: Delete this line after resolving memory shortage issue.
+        # videos = videos[:, :, :90, :128, :128]
+
+        return x, torch.from_numpy(videos)
 
 
 class CelebVTextDataset(torch.utils.data.Dataset):
@@ -55,14 +57,14 @@ class CelebVTextDataset(torch.utils.data.Dataset):
             texts_path: Path to the tokenized texts.
         """
         # fmt: off
-        self.texts = torch.load(texts_path) if exists(texts_path) else None
+        self.texts = torch.load(texts_path).cpu() if exists(texts_path) else None
 
         self.videos_ref = h5py.File(videos_path, "r")["videos"] if exists(videos_path) else None
         self.videos = torch.arange(len(self.videos_ref), dtype=torch.int64) if exists(videos_path) else None
 
-        self.text_embeds = torch.load(text_embeds_path) if exists(text_embeds_path) else None
+        self.text_embeds = torch.load(text_embeds_path).cpu() if exists(text_embeds_path) else None
 
-        self.video_embeds = torch.load(video_embeds_path) if exists(video_embeds_path) else None
+        self.video_embeds = torch.load(video_embeds_path).cpu() if exists(video_embeds_path) else None
 
         if exists(self.texts) and exists(self.videos):
             assert self.text_embeds is None and self.video_embeds is None, "Embeddings are not needed for CLIP training."

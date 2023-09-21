@@ -696,7 +696,7 @@ class Unet3D(nn.Module):
         x: torch.Tensor,
         time: torch.Tensor,
         *,
-        video_embed,
+        video_embed: torch.Tensor,
         lowres_cond_video=None,
         lowres_noise_level=None,
         text_encodings=None,

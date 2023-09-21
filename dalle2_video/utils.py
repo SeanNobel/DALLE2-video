@@ -11,11 +11,11 @@ from typing import Union, Optional, Callable
 
 
 class CLIPLoss(nn.Module):
-    def __init__(self, args):
+    def __init__(self, reduction: str = "mean", init_temperature: float = 5.0):
         super().__init__()
         self.compute_similarity = nn.CosineSimilarity(dim=-1)
-        self._criterion = nn.CrossEntropyLoss(reduction=args.reduction)
-        self.temp = nn.Parameter(torch.tensor([float(args.init_temperature)]))
+        self._criterion = nn.CrossEntropyLoss(reduction=reduction)
+        self.temp = nn.Parameter(torch.tensor([float(init_temperature)]))
 
     def forward(self, x, y, fast=True, return_logits=False):
         batch_size = x.size(0)
