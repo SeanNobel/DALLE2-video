@@ -4,6 +4,10 @@
 
 Something similar to Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458) is implemented and working.
 
+- Sep. 20
+  - CLIP trainingが良さそうだったので切り上げた．Decoder trainingがdeepspeed level3, batch_size=1でも走らないので要改善．
+- Sep. 8
+  - FSDPのdecoder trainingスクリプトを実装．CLIP trainingがおわったら実行．
 - Sep. 7
   - CLIP trainingはshardingなしでできたので，とりあえず走らせた（1エポック5時間程度）．
   - Shardingなしのdecoder訓練スクリプトを実装．
@@ -45,7 +49,9 @@ Configure DeepSpeed
 accelerate config
 ```
 
-- You should answer yes the question that asks if you want to use a config file for DeepSpeed to use the example json file that I provided `configs/zero_stage3_offload_config.json`
+- You should answer yes the question that asks if you want to use a config file for DeepSpeed to use the example json file that I provided `configs/deepspeed_config.json`
+
+  - Basic Accelerate config file will be saved to `~/.cache/huggingface/accelerate/default_config.yaml`
 
   - When using `deepspeed_config_file` (json), variable `gradient_accumulation_steps` is ignored, so we need to specify that from train config file (yaml).
 
@@ -54,7 +60,13 @@ accelerate config
 Run CLIP training
 
 ```bash
-accelerate launch train_clip.py use_wandb=True
+python train_clip.py use_wandb=True
+```
+
+Run decoder training
+
+```bash
+python train_decoder.py
 ```
 
 ## TODOs
