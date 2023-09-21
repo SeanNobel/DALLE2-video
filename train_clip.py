@@ -25,7 +25,7 @@ def run(args: DictConfig) -> None:
 
     if args.use_wandb:
         wandb.init(
-            project="dalle2-video",
+            project="dalle2-video_clip",
             config=OmegaConf.to_container(args),
             save_code=True,
         )
@@ -35,7 +35,7 @@ def run(args: DictConfig) -> None:
     run_dir = os.path.join("runs/celebv-text", args.train_name, "clip")
     os.makedirs(run_dir, exist_ok=True)
 
-    device = f"cuda:{args.cuda_id}"
+    device = f"cuda:{args.clip.cuda_id}"
 
     # -----------------------
     #       Dataloader
@@ -56,10 +56,10 @@ def run(args: DictConfig) -> None:
     )
 
     loader_args = {
-        "batch_size": args.batch_size,
+        "batch_size": args.clip.batch_size,
         "collate_fn": dataset.collate_fn,
         "drop_last": True,
-        "num_workers": args.num_workers,
+        "num_workers": args.clip.num_workers,
         "pin_memory": True,
     }
     train_loader = torch.utils.data.DataLoader(
@@ -72,7 +72,7 @@ def run(args: DictConfig) -> None:
     # ---------------
     #      Loss
     # ---------------
-    loss_func = CLIPLoss(args).to(device)
+    loss_func = CLIPLoss(args.clip.reduction, args.clip.init_temperature).to(device)
 
     # ---------------------
     #        Models
@@ -86,16 +86,16 @@ def run(args: DictConfig) -> None:
     # ---------------------
     #      Optimizers
     # ---------------------
-    optimizer = torch.optim.Adam(video_encoder.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(video_encoder.parameters(), lr=args.clip.lr)
 
-    if args.lr_scheduler == "cosine":
+    if args.clip.lr_scheduler == "cosine":
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=args.epochs, eta_min=args.lr * 0.01
+            optimizer, T_max=args.clip.epochs, eta_min=args.clip.lr * 0.01
         )
-    elif args.lr_scheduler == "multistep":
-        mlstns = [int(m * args.epochs) for m in args.lr_multistep_mlstns]
+    elif args.clip.lr_scheduler == "multistep":
+        mlstns = [int(m * args.clip.epochs) for m in args.clip.lr_multistep_mlstns]
         scheduler = torch.optim.lr_scheduler.MultiStepLR(
-            optimizer, milestones=mlstns, gamma=args.lr_step_gamma
+            optimizer, milestones=mlstns, gamma=args.clip.lr_step_gamma
         )
     else:
         raise ValueError()
@@ -103,22 +103,22 @@ def run(args: DictConfig) -> None:
     # -----------------------
     #     Strat training
     # -----------------------
-    accelerator = Accelerator()
+    # accelerator = Accelerator()
 
-    accelerator.gradient_accumulation_steps = args.deepspeed.gradient_accumulation_steps
+    # accelerator.gradient_accumulation_steps = args.deepspeed.gradient_accumulation_steps
 
-    if accelerator.distributed_type == DistributedType.DEEPSPEED:
-        precision = CAST_TYPE_MAP[accelerator.mixed_precision]
-        assert (precision == torch.float), "DeepSpeed currently only supports float32 precision when using on the fly embedding generation from clip"  # fmt: skip
-        clip_model.to(precision)
+    # if accelerator.distributed_type == DistributedType.DEEPSPEED:
+    #     precision = CAST_TYPE_MAP[accelerator.mixed_precision]
+    #     assert (precision == torch.float), "DeepSpeed currently only supports float32 precision when using on the fly embedding generation from clip"  # fmt: skip
+    #     clip_model.to(precision)
 
-    video_encoder, optimizer, scheduler, train_loader, test_loader = accelerator.prepare(
-        video_encoder, optimizer, scheduler, train_loader, test_loader
-    )
+    # video_encoder, optimizer, scheduler, train_loader, test_loader = accelerator.prepare(
+    #     video_encoder, optimizer, scheduler, train_loader, test_loader
+    # )
 
     min_test_loss = float("inf")
 
-    for epoch in range(args.epochs):
+    for epoch in range(args.clip.epochs):
         train_losses = []
         test_losses = []
         train_top10_accs = []
@@ -127,9 +127,6 @@ def run(args: DictConfig) -> None:
         test_top1_accs = []
 
         video_encoder.train()
-        if args.accum_grad:
-            optimizer.zero_grad()
-
         for texts, videos in tqdm(train_loader, desc="Train"):
             texts, videos = texts.to(device), videos.to(device)
 
@@ -148,14 +145,9 @@ def run(args: DictConfig) -> None:
             train_top10_accs.append(train_top10_acc)
             train_top1_accs.append(train_top1_acc)
 
-            if args.accum_grad:
-                loss.backward()
-            else:
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-        if args.accum_grad:
+            optimizer.zero_grad()
+            loss.backward()
+            # accelerator.backward(loss)
             optimizer.step()
 
         video_encoder.eval()
@@ -178,7 +170,7 @@ def run(args: DictConfig) -> None:
             test_top1_accs.append(test_top1_acc)
 
         print(
-            f"Epoch {epoch}/{args.epochs} | ",
+            f"Epoch {epoch}/{args.clip.epochs} | ",
             f"avg train loss: {np.mean(train_losses):.3f} | ",
             f"avg test loss: {np.mean(test_losses):.3f} | ",
             f"lr: {optimizer.param_groups[0]['lr']:.5f}",
