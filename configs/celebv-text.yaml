@@ -8,11 +8,13 @@ texts_dirs:
     light_intensity: light_intensity/
     light_temp: light_color_temp/
   tokenized: data/texts/tokenized.pt
+  embed: data/texts/embed.pt
 
 videos_dirs:
   root: /mnt/tsukuyomi/sensho/CelebV-Text/videos/
   untar: celebvtext_6/
   preprocessed: data/videos/chunked2.h5
+  embed: data/videos/embed.pt
 
 seq_len: 5
 fps: 30
@@ -42,8 +44,7 @@ clip:
   epochs: 500
   reduction: mean
   init_temperature: 5.0
-  accum_grad: False
-  cuda_id: 0
+  cuda_id: 2
   num_workers: 1 # Probably best to set 1 when using h5py or DeepSpeed (from completely different reasons)
 
 # ==== Decoder ==== #
@@ -63,7 +64,7 @@ timesteps: 1000
 decoder:
   batch_size: 1 # 64
   epochs: 50
-  cuda_id: 0
+  cuda_id: 2
   num_workers: 1
 
 decoder_trainer:
@@ -75,7 +76,7 @@ decoder_trainer:
   ema_update_every: 10
 
 deepspeed:
-  gradient_accumulation_steps: 1
+  gradient_accumulation_steps: 16
 
 seed: 1234
 
