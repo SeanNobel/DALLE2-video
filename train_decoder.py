@@ -2,6 +2,7 @@ import os, sys
 import numpy as np
 import torch
 import torch.nn as nn
+from torchinfo import summary
 from time import time
 from tqdm import tqdm
 from termcolor import cprint
@@ -11,8 +12,6 @@ import wandb
 import hydra
 from omegaconf import DictConfig, OmegaConf, open_dict
 from accelerate import Accelerator, DeepSpeedPlugin
-
-import clip
 
 from dalle2_video.datasets import CelebVTextDataset
 from dalle2_video.dalle2_video import Unet3D, VideoDecoder
@@ -39,16 +38,17 @@ def run(args: DictConfig) -> None:
     run_dir = os.path.join("runs/celebv-text", args.train_name, "decoder")
     os.makedirs(run_dir, exist_ok=True)
 
-    device = f"cuda:{args.cuda_id}"
+    accelerator = Accelerator()
+    accelerator.gradient_accumulation_steps = args.deepspeed.gradient_accumulation_steps
+
+    device = accelerator.device
 
     # -----------------------
     #       Dataloader
     # -----------------------
     dataset = CelebVTextDataset(
         videos_path=args.videos_dirs.preprocessed,
-        video_embeds_path=os.path.join(
-            "data/clip_embeds", args.train_name, "video_embeds.pt"
-        ),
+        video_embeds_path=args.videos_dirs.embed,
     )
     train_size = int(len(dataset) * args.train_ratio)
     test_size = len(dataset) - train_size
@@ -104,15 +104,13 @@ def run(args: DictConfig) -> None:
     # ---------------------
     #        Trainer
     # ---------------------
-    # accelerator = Accelerator(
-    #     deepspeed_plugin=
-    # )
-
     decoder_trainer = VideoDecoderTrainer(
         decoder,
-        # accelerator=accelerator,
-        # accum_grad=args.accum_grad,
-        # sub_batch_size=args.sub_batch_size if args.accum_grad else None,
+        accelerator=accelerator,
+        dataloaders={
+            "train": train_loader,
+            "val": test_loader,
+        },
         **args.decoder_trainer,
     )
 
@@ -121,30 +119,38 @@ def run(args: DictConfig) -> None:
     # -----------------------
     min_test_loss = float("inf")
 
-    for epoch in range(args.epochs):
+    for epoch in range(args.decoder.epochs):
         train_losses_unet1 = []
         train_losses_unet2 = []
         test_losses_unet1 = []
         test_losses_unet2 = []
 
-        for Y_embed, Y in tqdm(train_loader):
-            Y_embed, Y = Y_embed.to(device), Y.to(device)
+        for video_embed, video in tqdm(decoder_trainer.train_loader):
+            video_embed, video = video_embed.to(device), video.to(device)
 
-            loss_unet1 = decoder_trainer(video_embed=Y_embed, video=Y, unet_number=1)
+            loss_unet1 = decoder_trainer(
+                video_embed=video_embed, video=video, unet_number=1
+            )
             decoder_trainer.update(1)
 
-            loss_unet2 = decoder_trainer(video_embed=Y_embed, video=Y, unet_number=2)
+            loss_unet2 = decoder_trainer(
+                video_embed=video_embed, video=video, unet_number=2
+            )
             decoder_trainer.update(2)
 
             train_losses_unet1.append(loss_unet1)
             train_losses_unet2.append(loss_unet2)
 
-        for Y_embed, Y in tqdm(test_loader):
-            Y_embed, Y = Y_embed.to(device), Y.to(device)
+        for video_embed, video in tqdm(decoder_trainer.val_loader):
+            video_embed, video = video_embed.to(device), video.to(device)
 
-            loss_unet1 = decoder_trainer(video_embed=Y_embed, video=Y, unet_number=1)
+            loss_unet1 = decoder_trainer(
+                video_embed=video_embed, video=video, unet_number=1
+            )
 
-            loss_unet2 = decoder_trainer(video_embed=Y_embed, video=Y, unet_number=2)
+            loss_unet2 = decoder_trainer(
+                video_embed=video_embed, video=video, unet_number=2
+            )
 
             test_losses_unet1.append(loss_unet1)
             test_losses_unet2.append(loss_unet2)
