@@ -2,7 +2,6 @@ import os, sys
 import numpy as np
 import torch
 import torch.nn as nn
-from torchinfo import summary
 from time import time
 from tqdm import tqdm
 from termcolor import cprint
