@@ -21,12 +21,12 @@ from dalle2_video.trainer import VideoDecoderTrainer
 def run(args: DictConfig) -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    
+
     accelerator = Accelerator()
     accelerator.gradient_accumulation_steps = args.deepspeed.gradient_accumulation_steps
 
     device = accelerator.device
-    
+
     if args.use_wandb and accelerator.is_main_process:
         wandb.config = {
             k: v for k, v in dict(args).items() if k not in ["root_dir", "wandb"]
@@ -155,7 +155,7 @@ def run(args: DictConfig) -> None:
             test_losses_unet2.append(loss_unet2)
 
         print(
-            f"Epoch {epoch}/{args.epochs} | ",
+            f"Epoch {epoch}/{args.decoder.epochs} | ",
             f"avg train loss unet1: {np.mean(train_losses_unet1):.3f} | ",
             f"avg train loss unet2: {np.mean(train_losses_unet2):.3f} | ",
             f"avg test loss unet1: {np.mean(test_losses_unet1):.3f} | ",

@@ -4,16 +4,6 @@
 
 Something similar to Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458) is implemented and working.
 
-- Sep. 29
-  - ms4-5にて，4 subsetsでdecoder trainingを開始．
-- Sep. 20
-  - CLIP trainingが良さそうだったので切り上げた．Decoder trainingがdeepspeed level3, batch_size=1でも走らないので要改善．
-- Sep. 8
-  - FSDPのdecoder trainingスクリプトを実装．CLIP trainingがおわったら実行．
-- Sep. 7
-  - CLIP trainingはshardingなしでできたので，とりあえず走らせた（1エポック5時間程度）．
-  - Shardingなしのdecoder訓練スクリプトを実装．
-
 ## Training on CelebV-Text dataset
 
 Download CelebV-Text dataset from their [GitHub](https://github.com/celebv-text/CelebV-Text/issues/8).
@@ -69,18 +59,17 @@ Run CLIP training
 nohup python train_clip.py use_wandb=**** > logs/****.log &
 ```
 
+Run prior training
+
+```bash
+nohup python train_prior.py use_wandb=**** > logs/****.log &
+```
+
 Run decoder training
 
 ```bash
 nohup accelerate launch train_decoder.py train_name=**** use_wandb=**** > logs/****.log &
 ```
-
-## TODOs
-
-- [x] Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458)
-- [ ] Support ZeRO stage 3 training with [DeepSpeed](https://huggingface.co/docs/accelerate/usage_guides/deepspeed#deepspeed-config-file)
-- [ ] Temporal super-resolution proposed in [Ho et al., Oct 2022](https://arxiv.org/abs/2210.02303)
-- [ ] Learning variance for video diffusion significantly unstabilized the training. Is there a way to stably learn variance?
 
 ## References
 
@@ -89,3 +78,25 @@ nohup accelerate launch train_decoder.py train_name=**** use_wandb=**** > logs/*
 - Video Diffusion Models ([Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458))
 
 - Imagen Video: High Definition Video Generation with Diffusion Models ([Ho et al., Oct 2022](https://arxiv.org/abs/2210.02303))
+
+## Private
+
+### Status
+
+- Sep. 29
+  - ms4-5にて，4 subsetsでdecoder trainingを開始．
+- Sep. 20
+  - CLIP trainingが良さそうだったので切り上げた．Decoder trainingがdeepspeed level3, batch_size=1でも走らないので要改善．
+- Sep. 8
+  - FSDPのdecoder trainingスクリプトを実装．CLIP trainingがおわったら実行．
+- Sep. 7
+  - CLIP trainingはshardingなしでできたので，とりあえず走らせた（1エポック5時間程度）．
+  - Shardingなしのdecoder訓練スクリプトを実装．
+
+### TODOs
+
+- [ ] Priorの訓練コードを実装．
+- [x] Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458)
+- [ ] Support ZeRO stage 3 training with [DeepSpeed](https://huggingface.co/docs/accelerate/usage_guides/deepspeed#deepspeed-config-file)
+- [ ] Temporal super-resolution proposed in [Ho et al., Oct 2022](https://arxiv.org/abs/2210.02303)
+- [ ] Learning variance for video diffusion significantly unstabilized the training. Is there a way to stably learn variance?
