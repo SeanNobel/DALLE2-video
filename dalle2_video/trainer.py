@@ -1,3 +1,4 @@
+import sys
 from termcolor import cprint
 from tqdm import tqdm
 
@@ -9,8 +10,6 @@ class VideoDecoderTrainer(nn.Module):
     def __init__(
         self,
         decoder,
-        # accum_grad: bool = False,
-        # sub_batch_size: int = 1,
         accelerator=None,
         dataloaders=None,
         use_ema=True,
@@ -28,9 +27,6 @@ class VideoDecoderTrainer(nn.Module):
         assert isinstance(decoder, VideoDecoder)
         ema_kwargs, kwargs = groupby_prefix_and_trim("ema_", kwargs)
 
-        # self.accum_grad = accum_grad
-        # self.sub_batch_size = sub_batch_size
-
         self.accelerator = default(accelerator, Accelerator)
 
         self.num_unets = len(decoder.unets)
@@ -47,10 +43,7 @@ class VideoDecoderTrainer(nn.Module):
             partial(cast_tuple, length=self.num_unets),
             (lr, wd, eps, warmup_steps, cosine_decay_max_steps),
         )
-
-        assert all(
-            [unet_lr <= 1e-2 for unet_lr in lr]
-        ), "your learning rate is too high, recommend sticking with 1e-4, at most 5e-4"
+        assert all([unet_lr <= 1e-2 for unet_lr in lr]), "your learning rate is too high, recommend sticking with 1e-4, at most 5e-4"  # fmt: skip
 
         optimizers = []
         schedulers = []
@@ -116,9 +109,8 @@ class VideoDecoderTrainer(nn.Module):
                 "no": torch.float,
             }
             precision_type = cast_type_map[accelerator.mixed_precision]
-            assert (
-                precision_type == torch.float
-            ), "DeepSpeed currently only supports float32 precision when using on the fly embedding generation from clip"
+            assert (precision_type == torch.float), "DeepSpeed currently only supports float32 precision when using on the fly embedding generation from clip"  # fmt: skip
+
             clip = decoder.clip
             clip.to(precision_type)
 
@@ -341,7 +333,7 @@ class VideoDecoderTrainer(nn.Module):
         cond_videos = []
         for chunk_size_frac, (chunked_args, chunked_kwargs) in split_args_and_kwargs(
             *args, **kwargs, split_size=max_batch_size
-        ):  # self.sub_batch_size)
+        ):
             with self.accelerator.autocast():
                 loss_obj = self.decoder(
                     *chunked_args,
@@ -361,15 +353,10 @@ class VideoDecoderTrainer(nn.Module):
                 if cond_video is not None:
                     cond_videos.append(cond_video)
 
-            total_loss += loss.item()  # .append(loss)
+            total_loss += loss.item()
 
-            if self.training:  # and not self.accum_grad:
+            if self.training:
                 self.accelerator.backward(loss)
-
-        # total_loss = torch.stack(total_loss).mean()
-
-        # if self.training and self.accum_grad:
-        #     self.accelerator.backward(total_loss)
 
         if return_lowres_cond_video:
             return total_loss, torch.stack(cond_videos)
