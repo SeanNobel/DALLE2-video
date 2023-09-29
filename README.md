@@ -4,7 +4,7 @@
 
 Something similar to Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458) is implemented and working.
 
-- Sep. 28
+- Sep. 29
   - ms4-5にて，4 subsetsでdecoder trainingを開始．
 - Sep. 20
   - CLIP trainingが良さそうだったので切り上げた．Decoder trainingがdeepspeed level3, batch_size=1でも走らないので要改善．
@@ -66,13 +66,13 @@ accelerate config
 Run CLIP training
 
 ```bash
-python train_clip.py use_wandb=True
+nohup python train_clip.py use_wandb=**** > logs/****.log &
 ```
 
 Run decoder training
 
 ```bash
-python train_decoder.py
+nohup accelerate launch train_decoder.py train_name=**** use_wandb=**** > logs/****.log &
 ```
 
 ## TODOs
