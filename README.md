@@ -4,6 +4,8 @@
 
 Something similar to Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/abs/2204.03458) is implemented and working.
 
+- Sep. 29
+  - ms4-5にて，4 subsetsでdecoder trainingを開始．
 - Sep. 20
   - CLIP trainingが良さそうだったので切り上げた．Decoder trainingがdeepspeed level3, batch_size=1でも走らないので要改善．
 - Sep. 8
@@ -14,7 +16,9 @@ Something similar to Unet3D proposed in [Ho et al., Apr 2022](https://arxiv.org/
 
 ## Training on CelebV-Text dataset
 
-Download CelebV-Text dataset from their [GitHub](https://github.com/CelebV-Text/CelebV-Text#download).
+Download CelebV-Text dataset from their [GitHub](https://github.com/celebv-text/CelebV-Text/issues/8).
+
+- Dataset (70,000 videos) is separated into 70 zip files. You don't need to download all of them.
 
 - After untaring the dataset, the folder structure should look like this:
 
@@ -41,6 +45,8 @@ python preprocess.py
 
 - Preprocesses videos and save as a `.h5` file (saved under `videos/`).
 
+  - Videos are usually tens of seconds long. This preprocessing takes only the first `args.seq_len` seconds.
+
   - When training, `CelebVTextDataset` only reads pointers to the videos. The videos are loaded in the collate function. This is to avoid loading all videos into memory at once.
 
 Configure DeepSpeed
@@ -60,13 +66,13 @@ accelerate config
 Run CLIP training
 
 ```bash
-python train_clip.py use_wandb=True
+nohup python train_clip.py use_wandb=**** > logs/****.log &
 ```
 
 Run decoder training
 
 ```bash
-python train_decoder.py
+nohup accelerate launch train_decoder.py train_name=**** use_wandb=**** > logs/****.log &
 ```
 
 ## TODOs

@@ -21,8 +21,13 @@ from dalle2_video.trainer import VideoDecoderTrainer
 def run(args: DictConfig) -> None:
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    
+    accelerator = Accelerator()
+    accelerator.gradient_accumulation_steps = args.deepspeed.gradient_accumulation_steps
 
-    if args.use_wandb:
+    device = accelerator.device
+    
+    if args.use_wandb and accelerator.is_main_process:
         wandb.config = {
             k: v for k, v in dict(args).items() if k not in ["root_dir", "wandb"]
         }
@@ -36,11 +41,6 @@ def run(args: DictConfig) -> None:
 
     run_dir = os.path.join("runs/celebv-text", args.train_name, "decoder")
     os.makedirs(run_dir, exist_ok=True)
-
-    accelerator = Accelerator()
-    accelerator.gradient_accumulation_steps = args.deepspeed.gradient_accumulation_steps
-
-    device = accelerator.device
 
     # -----------------------
     #       Dataloader
@@ -162,7 +162,7 @@ def run(args: DictConfig) -> None:
             f"avg test loss unet2: {np.mean(test_losses_unet2):.3f} | ",
         )
 
-        if args.use_wandb:
+        if args.use_wandb and accelerator.is_main_process:
             performance_now = {
                 "epoch": epoch,
                 "train_loss_unet1": np.mean(train_losses_unet1),
