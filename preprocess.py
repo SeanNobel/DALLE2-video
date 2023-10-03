@@ -85,7 +85,7 @@ def run(args: DictConfig) -> None:
 
     num_frames = int(args.seq_len * args.fps)
     shape = (3, num_frames, 224, 224)
-    hdf = h5py.File(os.path.join(args.videos_dirs.root, "preprocessed.h5"), "w")
+    hdf = h5py.File(os.path.join(args.videos_dirs.root, "preprocessed_20subsets.h5"), "w")
     videos = hdf.require_dataset(
         name="videos",
         shape=(0, *shape),
@@ -121,7 +121,7 @@ def run(args: DictConfig) -> None:
     cprint(f"Tokenizing {len(texts)} texts.", "cyan")
     texts = clip.tokenize(texts, truncate=True)
 
-    torch.save(texts, os.path.join(args.texts_dirs.root, "tokenized.pt"))
+    torch.save(texts, os.path.join(args.texts_dirs.root, "tokenized_20subsets.pt"))
 
 
 if __name__ == "__main__":
