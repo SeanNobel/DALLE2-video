@@ -115,13 +115,19 @@ class VideoDecoderTrainer(nn.Module):
             clip.to(precision_type)
 
         if exists(dataloaders):
-            decoder, *optimizers, train_loader, val_loader = list(
+            decoder, decoder.unets, *optimizers, train_loader, val_loader = list(
                 self.accelerator.prepare(
-                    decoder, *optimizers, dataloaders["train"], dataloaders["val"]
+                    decoder,
+                    decoder.unets,
+                    *optimizers,
+                    dataloaders["train"],
+                    dataloaders["val"],
                 )
             )
         else:
-            decoder, *optimizers = list(self.accelerator.prepare(decoder, *optimizers))
+            decoder, decoder.unets, *optimizers = list(
+                self.accelerator.prepare(decoder, decoder.unets, *optimizers)
+            )
 
             train_loader = val_loader = None
 
