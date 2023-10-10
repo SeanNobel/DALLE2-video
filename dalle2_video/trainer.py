@@ -117,11 +117,17 @@ class VideoDecoderTrainer(nn.Module):
         if exists(dataloaders):
             decoder, *optimizers, train_loader, val_loader = list(
                 self.accelerator.prepare(
-                    decoder, *optimizers, dataloaders["train"], dataloaders["val"]
+                    decoder,
+                    *decoder.unets,
+                    *optimizers,
+                    dataloaders["train"],
+                    dataloaders["val"],
                 )
             )
         else:
-            decoder, *optimizers = list(self.accelerator.prepare(decoder, *optimizers))
+            decoder, *optimizers = list(
+                self.accelerator.prepare(decoder, *decoder.unets, *optimizers)
+            )
 
             train_loader = val_loader = None
 
